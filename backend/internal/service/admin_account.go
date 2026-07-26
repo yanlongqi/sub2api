@@ -110,8 +110,8 @@ var duplicateAccountDiscardedExtraKeys = map[string]struct{}{
 	"quota_weekly_reset_at":  {},
 	"quota_monthly_reset_at": {},
 	// Upstream quota sync snapshot belongs to the source account's identity.
-	UpstreamQuotaSyncExtraKey:         {},
-	UpstreamQuotaSyncEnabledExtraKey:  {},
+	UpstreamQuotaSyncExtraKey:        {},
+	UpstreamQuotaSyncEnabledExtraKey: {},
 	// Provider observations, capability probes, and transient scheduling state.
 	"model_rate_limits":                      {},
 	"session_window_utilization":             {},

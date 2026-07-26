@@ -626,6 +626,10 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if err := s.updateSnapshot(ctx, account, snapshot); err != nil {
 		return nil, err
 	}
+	// 探测成功后，无条件把上游 resolved_rate_multiplier 同步到本地
+	// accounts.rate_multiplier，使本地计费倍率跟随上游声明。失败仅记录日志，
+	// 不影响探测本身的成功语义（snapshot 已落库）。
+	s.syncRateMultiplierFromUpstream(ctx, account, snapshot)
 	return snapshot, nil
 }
 
@@ -850,6 +854,36 @@ func upstreamBillingProbeEnabled(account *Account) bool {
 	}
 	enabled, ok := account.Extra[UpstreamBillingProbeEnabledExtraKey].(bool)
 	return ok && enabled
+}
+
+// syncRateMultiplierFromUpstream 把探测到的上游 resolved_rate_multiplier
+// 无条件同步到本地 accounts.rate_multiplier。只要探测成功且 snapshot.Data
+// 含合法 resolved_rate_multiplier、且与当前本地值不同就执行。同步失败仅记录
+// 日志，不影响探测成功语义。手动探测与定时探测共用此路径。
+func (s *UpstreamBillingProbeService) syncRateMultiplierFromUpstream(ctx context.Context, account *Account, snapshot *UpstreamBillingProbeSnapshot) {
+	if s == nil || s.accountRepo == nil || account == nil || snapshot == nil {
+		return
+	}
+	if snapshot.Status != UpstreamBillingProbeStatusOK || len(snapshot.Data) == 0 {
+		return
+	}
+	if !isUpstreamBillingProbeAccount(account) {
+		return
+	}
+	rate, ok := resolveAccountExtraNumber(snapshot.Data, "resolved_rate_multiplier")
+	if !ok || rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return
+	}
+	current := account.BillingRateMultiplier()
+	if equalBillingMultiplier(current, rate) {
+		return
+	}
+	updates := AccountBulkUpdate{RateMultiplier: &rate}
+	if _, err := s.accountRepo.BulkUpdate(ctx, []int64{account.ID}, updates); err != nil {
+		logger.LegacyPrintf("service.upstream_billing_probe", "[SyncRate] failed to sync rate_multiplier: account_id=%d old=%v new=%v err=%v", account.ID, current, rate, err)
+		return
+	}
+	logger.LegacyPrintf("service.upstream_billing_probe", "[SyncRate] synced rate_multiplier: account_id=%d old=%v new=%v", account.ID, current, rate)
 }
 
 func (s *UpstreamBillingProbeService) currentTime() time.Time {
