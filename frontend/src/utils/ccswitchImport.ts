@@ -25,6 +25,24 @@ function withV1Endpoint(baseUrl: string): string {
   return normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`
 }
 
+/**
+ * 将脚本以 ASCII 安全的方式 base64 编码。
+ *
+ * `btoa` 仅接受 Latin1 字符，包含中文等非 ASCII 字符时会抛
+ * `InvalidCharacterError`。这里先把每个非 ASCII 字符转成 `\uXXXX` 字面量，
+ * 使编码后的源码为纯 ASCII：
+ *   - `btoa` 不再抛错；
+ *   - CC-Switch 解码后拿到的是合法 JS 源码，JS 引擎会正确还原中文，
+ *     与其按 Latin1 还是 UTF-8 解码 base64 字节无关。
+ */
+function encodeUsageScript(script: string): string {
+  const asciiSafe = script.replace(/[^\x00-\x7F]/g, (ch) => {
+    const code = ch.charCodeAt(0)
+    return `\\u${code.toString(16).padStart(4, '0')}`
+  })
+  return btoa(asciiSafe)
+}
+
 export function resolveCcSwitchImportConfig(
   platform: GroupPlatform | undefined | null,
   clientType: CcSwitchClientType,
@@ -72,7 +90,7 @@ export function buildCcSwitchImportDeeplink(input: CcSwitchImportDeeplinkInput):
     ['apiKey', input.apiKey],
     ['configFormat', 'json'],
     ['usageEnabled', 'true'],
-    ['usageScript', btoa(input.usageScript)],
+    ['usageScript', encodeUsageScript(input.usageScript)],
     ['usageAutoInterval', '30']
   ]
 

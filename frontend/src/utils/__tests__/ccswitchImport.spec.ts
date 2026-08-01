@@ -93,4 +93,26 @@ describe('ccswitchImport utils', () => {
     expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/antigravity`)
     expect(params.has('model')).toBe(false)
   })
+
+  it('encodes usage scripts with non-Latin1 characters without throwing and round-trips back to a JS-equivalent source', () => {
+    const chineseScript = 'function (r) { return { planName: "订阅" }; }'
+
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        usageScript: chineseScript
+      })
+    )
+
+    // btoa 在遇到非 Latin1 字符时会抛 InvalidCharacterError；这里只要能拿到值就说明没抛错。
+    const encoded = params.get('usageScript')
+    expect(encoded).toBeTruthy()
+    // 解码后是纯 ASCII 的合法 JS 源码，中文被转成 \uXXXX 字面量，与原脚本在 JS 语义上等价。
+    const decoded = atob(encoded!)
+    expect(decoded).not.toContain('订阅')
+    expect(decoded).toContain('\\u8ba2\\u9605')
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('return (' + decoded + ')') as () => (r: unknown) => { planName: string }
+    expect(fn()({}).planName).toBe('订阅')
+  })
 })
