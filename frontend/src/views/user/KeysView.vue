@@ -1891,15 +1891,111 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
     request: {
       url: "{{baseUrl}}/v1/usage",
       method: "GET",
-      headers: { "Authorization": "Bearer {{apiKey}}" }
+      headers: {
+        "Authorization": "Bearer {{apiKey}}",
+        "Content-Type": "application/json",
+        "User-Agent": "cc-switch/1.0"
+      }
     },
-    extractor: function(response) {
-      const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
-      const unit = response?.unit ?? response?.quota?.unit ?? "USD";
+    extractor: function (response) {
+      if (response.error || response.isValid === false) {
+        var msg = "API Key 无效或查询失败";
+        if (response.error && response.error.message) msg = response.error.message;
+        else if (response.message) msg = response.message;
+        return { isValid: false, invalidMessage: msg };
+      }
+
+      function pct(used, limit) {
+        if (!limit || limit <= 0) return null;
+        var p = ((used || 0) / limit) * 100;
+        if (p < 0) p = 0;
+        if (p > 100) p = 100;
+        return Math.round(p);
+      }
+
+      // 1. 订阅模式
+      if (response.subscription) {
+        var sub = response.subscription;
+        var tiers = [];
+        var d = pct(sub.daily_usage_usd, sub.daily_limit_usd);
+        var w = pct(sub.weekly_usage_usd, sub.weekly_limit_usd);
+        var m = pct(sub.monthly_usage_usd, sub.monthly_limit_usd);
+        if (d !== null) tiers.push("日 " + d + "%");
+        if (w !== null) tiers.push("周 " + w + "%");
+        if (m !== null) tiers.push("月 " + m + "%");
+
+        if (response.remaining < 0) {
+          return {
+            planName: response.planName || "订阅",
+            remaining: null,
+            used: null,
+            total: null,
+            unit: response.unit || "USD",
+            extra: "无限制"
+          };
+        }
+        var limit = sub.monthly_limit_usd || sub.weekly_limit_usd || sub.daily_limit_usd;
+        var used = sub.monthly_usage_usd || sub.weekly_usage_usd || sub.daily_usage_usd || 0;
+        return {
+          planName: response.planName || "订阅",
+          remaining: response.remaining,
+          used: used,
+          total: limit || response.remaining,
+          unit: response.unit || "USD",
+          extra: tiers.length > 0 ? tiers.join(" · ") : "无限制"
+        };
+      }
+
+      // 2. 配额受限模式（总额度）
+      if (response.quota) {
+        var q = response.quota;
+        var qp = pct(q.used, q.limit);
+        return {
+          planName: "API Key 配额",
+          remaining: q.remaining,
+          used: q.used,
+          total: q.limit,
+          unit: q.unit || "USD",
+          extra: qp !== null ? qp + "%" : ""
+        };
+      }
+
+      // 3. 仅速率限制（无总额度）
+      if (response.rate_limits && response.rate_limits.length > 0) {
+        var rls = response.rate_limits;
+        var binding = rls[0];
+        var bindingRatio = pct(binding.used, binding.limit);
+        for (var i = 1; i < rls.length; i++) {
+          var r = pct(rls[i].used, rls[i].limit);
+          if (r !== null && (bindingRatio === null || r > bindingRatio)) {
+            binding = rls[i];
+            bindingRatio = r;
+          }
+        }
+        var windows = rls
+          .map(function (x) {
+            var p = pct(x.used, x.limit);
+            return x.window + " " + (p !== null ? p + "%" : "∞");
+          })
+          .join(" · ");
+        return {
+          planName: "速率限制",
+          remaining: binding.remaining,
+          used: binding.used,
+          total: binding.limit,
+          unit: "USD",
+          extra: windows
+        };
+      }
+
+      // 4. 余额模式
       return {
-        isValid: response?.is_active ?? response?.isValid ?? true,
-        remaining,
-        unit
+        planName: response.planName || "钱包余额",
+        remaining: response.remaining,
+        used: response?.usage?.total?.cost || 0,
+        total: response.remaining,
+        unit: response.unit || "USD",
+        extra: ""
       };
     }
   })`
