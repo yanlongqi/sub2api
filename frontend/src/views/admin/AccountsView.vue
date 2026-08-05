@@ -320,6 +320,7 @@
               :manual-refresh-token="usageManualRefreshToken"
               :manual-refreshing-upstream-quota-sync="refreshingUpstreamQuotaSync.has(row.id)"
               @refresh-upstream-quota-sync="handleRefreshUpstreamQuotaSync(row)"
+              @account-updated="handleAccountUpdated"
             />
           </template>
           <template #cell-proxy="{ row }">

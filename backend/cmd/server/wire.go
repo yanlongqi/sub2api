@@ -88,6 +88,7 @@ func provideCleanup(
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
+	codexVersionSync *service.OpenAICodexVersionSyncService,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
@@ -111,6 +112,7 @@ func provideCleanup(
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	quotaFlusher *service.UserPlatformQuotaUsageFlusher,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
+	upstreamQuotaSync *service.UpstreamQuotaSyncService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	auditLog *service.AuditLogService,
 	promptAudit *securityaudit.PromptService,
@@ -236,6 +238,10 @@ func provideCleanup(
 				accountExpiry.Stop()
 				return nil
 			}},
+			{"OpenAICodexVersionSyncService", func() error {
+				codexVersionSync.Stop()
+				return nil
+			}},
 			{"ProxyExpiryService", func() error {
 				proxyExpiry.Stop()
 				return nil
@@ -329,6 +335,12 @@ func provideCleanup(
 			{"UpstreamBillingProbeService", func() error {
 				if upstreamBillingProbe != nil {
 					upstreamBillingProbe.Stop()
+				}
+				return nil
+			}},
+			{"UpstreamQuotaSyncService", func() error {
+				if upstreamQuotaSync != nil {
+					upstreamQuotaSync.Stop()
 				}
 				return nil
 			}},
