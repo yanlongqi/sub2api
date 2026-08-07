@@ -1464,8 +1464,30 @@
             class="mt-3 flex items-center justify-between gap-3"
           >
             <div class="min-w-0">
-              <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
+              <p class="flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-200">
                 {{ t('admin.accounts.upstreamBilling.syncRate') }}
+                <span
+                  v-if="upstreamBillingRateSyncEnabled && upstreamDeclaredRate != null"
+                  class="group relative inline-flex"
+                >
+                  <span
+                    class="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-200 text-xs text-gray-500 hover:bg-gray-300 dark:bg-dark-600 dark:text-gray-400 dark:hover:bg-dark-500"
+                  >
+                    ?
+                  </span>
+                  <div
+                    class="pointer-events-none absolute left-0 top-full z-[100] mt-1.5 w-72 rounded bg-gray-900 px-3 py-2 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100 dark:bg-gray-700"
+                  >
+                    {{ t('admin.accounts.upstreamBilling.syncedRateTooltipDetail', {
+                      upstreamRate: upstreamDeclaredRate,
+                      rateFactor: upstreamRateFactor,
+                      schedulingRate: schedulingRate
+                    }) }}
+                    <div
+                      class="absolute bottom-full left-3 border-4 border-transparent border-b-gray-900 dark:border-b-gray-700"
+                    ></div>
+                  </div>
+                </span>
               </p>
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.upstreamBilling.syncRateHint') }}
@@ -2733,6 +2755,7 @@ import {
 import { formatDateTime, formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
+import type { UpstreamBillingProbeSnapshot } from '@/types'
 import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
@@ -2888,6 +2911,18 @@ const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 const upstreamRateFactor = ref(1)
+// 上游声明倍率（从 probe snapshot 提取），仅在 syncRate 开启时有意义
+const upstreamDeclaredRate = computed(() => {
+  const probe = (props.account?.extra as Record<string, unknown> | undefined)?.upstream_billing_probe as
+    | UpstreamBillingProbeSnapshot
+    | undefined
+  return probe?.data?.resolved_rate_multiplier
+})
+// 调度使用倍率 = 上游声明倍率 × 费率倍率
+const schedulingRate = computed(() => {
+  if (upstreamDeclaredRate.value == null) return null
+  return upstreamDeclaredRate.value * upstreamRateFactor.value
+})
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')

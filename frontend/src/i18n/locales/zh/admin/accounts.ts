@@ -186,6 +186,7 @@ export default {
         rateFactorHint: '调度时实际使用的倍率 = 上游声明倍率 × 此值。默认 1，仅开启"同步上游声明倍率"时可修改。',
         rateFactorDisabledHint: '需先开启"同步上游声明倍率"才能修改此值。',
         syncedRateTooltip: '该账号倍率由上游声明的基准倍率（不含高峰）自动同步',
+        syncedRateTooltipDetail: '上游声明倍率：{upstreamRate}x\n上游费率倍率：{rateFactor}x\n调度使用倍率：{schedulingRate}x',
         manualProbe: '立即探测上游倍率',
         stale: '已过期',
         unsupported: '不支持',

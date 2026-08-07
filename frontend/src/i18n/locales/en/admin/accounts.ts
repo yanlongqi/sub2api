@@ -233,6 +233,7 @@ export default {
         rateFactorHint: 'The rate used for scheduling = upstream declared rate × this value. Defaults to 1; only editable when "Sync upstream declared rate" is enabled.',
         rateFactorDisabledHint: 'Enable "Sync upstream declared rate" to modify this value.',
         syncedRateTooltip: 'This account rate is synchronized from the upstream declared base rate (excluding peak hours)',
+        syncedRateTooltipDetail: 'Upstream declared rate: {upstreamRate}x\nUpstream rate factor: {rateFactor}x\nScheduling rate: {schedulingRate}x',
         manualProbe: 'Probe upstream rate now',
         stale: 'Stale',
         unsupported: 'Unsupported',
