@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -463,6 +464,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
+	delete(accountExtra, UpstreamRateFactorExtraKey)
 	delete(accountExtra, OllamaCloudUsageSessionExtraKey)
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
@@ -687,6 +689,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		delete(normalizedExtra, UpstreamBillingProbeEnabledExtraKey)
 		delete(normalizedExtra, UpstreamBillingRateSyncEnabledExtraKey)
 		delete(normalizedExtra, UpstreamBillingProbeExtraKey)
+		delete(normalizedExtra, UpstreamRateFactorExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageSessionExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageAutoRefreshExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageSnapshotExtraKey)
@@ -701,6 +704,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			UpstreamBillingProbeEnabledExtraKey,
 			UpstreamBillingRateSyncEnabledExtraKey,
 			UpstreamBillingProbeExtraKey,
+			UpstreamRateFactorExtraKey,
 			UpstreamQuotaSyncExtraKey,
 			OllamaCloudUsageSessionExtraKey,
 			OllamaCloudUsageAutoRefreshExtraKey,
@@ -757,6 +761,23 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if requestedRateSyncEnabledUpdate != nil {
 		account.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *requestedRateSyncEnabledUpdate
+	}
+	// 上游费率倍率：仅当同步上游声明倍率开启时才接受修改。
+	// 关闭同步的同一请求中携带 factor 会被拒绝——factor 只在同步模式下有意义。
+	if input.UpstreamRateFactor != nil {
+		if !upstreamBillingRateSyncEnabled(account) {
+			return nil, infraerrors.BadRequest(
+				"UPSTREAM_RATE_FACTOR_REQUIRES_RATE_SYNC",
+				"upstream_rate_factor can only be set when upstream billing rate sync is enabled",
+			)
+		}
+		if *input.UpstreamRateFactor < 0 || math.IsNaN(*input.UpstreamRateFactor) || math.IsInf(*input.UpstreamRateFactor, 0) {
+			return nil, infraerrors.BadRequest("INVALID_UPSTREAM_RATE_FACTOR", "upstream_rate_factor must be >= 0")
+		}
+		if account.Extra == nil {
+			account.Extra = make(map[string]any)
+		}
+		account.Extra[UpstreamRateFactorExtraKey] = *input.UpstreamRateFactor
 	}
 	// 影子代理恒继承母账号(由 propagateProxyToShadows 同步),不接受独立编辑——外审 B/P1;
 	// 否则要等母账号下次改 proxy 才被覆盖,期间影子会出现"有时继承、有时独立"的漂移。
@@ -1078,6 +1099,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			})
 		}
 	}
+	if input.UpstreamRateFactor != nil {
+		if *input.UpstreamRateFactor < 0 || math.IsNaN(*input.UpstreamRateFactor) || math.IsInf(*input.UpstreamRateFactor, 0) {
+			return nil, errors.New("upstream_rate_factor must be >= 0")
+		}
+	}
 
 	// 校验并规范化请求头覆写配置（批量路径为 JSONB 顶层 key 合并，直接校验增量即可）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
@@ -1106,6 +1132,12 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		// JSON null makes every reader treat the old snapshot as absent and lets the
 		// next enabled runner cycle probe the new upstream identity immediately.
 		repoUpdates.Extra[UpstreamBillingProbeExtraKey] = nil
+	}
+	if input.UpstreamRateFactor != nil {
+		if repoUpdates.Extra == nil {
+			repoUpdates.Extra = make(map[string]any)
+		}
+		repoUpdates.Extra[UpstreamRateFactorExtraKey] = *input.UpstreamRateFactor
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name

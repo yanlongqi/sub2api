@@ -386,6 +386,7 @@ type UpdateAccountInput struct {
 	AutoPauseOnExpired    *bool
 	ProbeEnabled          *bool
 	RateSyncEnabled       *bool
+	UpstreamRateFactor    *float64 // 上游费率倍率，仅 rate_sync 开启时可修改，默认 1.0
 	SkipMixedChannelCheck bool // 跳过混合渠道检查（用户已确认风险）
 }
 
@@ -405,6 +406,7 @@ type BulkUpdateAccountsInput struct {
 	Credentials    map[string]any
 	Extra          map[string]any
 	ProbeEnabled   *bool
+	UpstreamRateFactor *float64 // 上游费率倍率，仅 rate_sync 开启时可修改，默认 1.0
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
 	// This should only be set when the caller has explicitly confirmed the risk.
 	SkipMixedChannelCheck bool

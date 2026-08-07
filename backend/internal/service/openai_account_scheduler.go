@@ -2742,7 +2742,17 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 	if freshUntil == nil || !freshUntil.After(receivedAt) || now.Before(receivedAt) || now.After(*freshUntil) {
 		return 0, false
 	}
-	return upstreamBillingRateAt(snapshot.Data, now)
+	rate, ok := upstreamBillingRateAt(snapshot.Data, now)
+	if !ok {
+		return 0, false
+	}
+	// 管理员可配置费率倍率，用于放大上游声明倍率在调度中的影响力。
+	// 仅在 rate_sync 开启时该值才有意义（关同步时上游倍率不参与调度）。
+	rate *= upstreamRateFactor(account)
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate < 0 {
+		return 0, false
+	}
+	return rate, true
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {

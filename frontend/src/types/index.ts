@@ -1447,6 +1447,7 @@ export interface UpdateAccountRequest {
   auto_pause_on_expired?: boolean
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
+  upstream_rate_factor?: number
   confirm_mixed_channel_risk?: boolean
 }
 

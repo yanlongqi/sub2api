@@ -32,6 +32,9 @@ const (
 	UpstreamBillingProbeExtraKey           = "upstream_billing_probe"
 	UpstreamBillingProbeEnabledExtraKey    = "upstream_billing_probe_enabled"
 	UpstreamBillingRateSyncEnabledExtraKey = "upstream_billing_rate_sync_enabled"
+	// UpstreamRateFactorExtraKey 存储管理员配置的费率倍率，用于放大上游声明倍率在调度中的影响力。
+	// 仅当 rate_sync 开启时才可修改；默认 1.0（即不放大）。
+	UpstreamRateFactorExtraKey = "upstream_rate_factor"
 
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
@@ -897,6 +900,20 @@ func upstreamBillingProbeSyncRate(data map[string]any) (float64, bool) {
 		return 0, false
 	}
 	return rounded, true
+}
+
+// upstreamRateFactor 读取管理员配置的费率倍率（存 accounts.extra[upstream_rate_factor]）。
+// 默认 1.0（不放大）。仅当 rate_sync 开启时该值才参与调度计算。
+// 非法值（NaN/Inf/负数）一律回退为 1.0。
+func upstreamRateFactor(account *Account) float64 {
+	if account == nil || account.Extra == nil {
+		return 1.0
+	}
+	value, ok := resolveAccountExtraNumber(account.Extra, UpstreamRateFactorExtraKey)
+	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 1.0
+	}
+	return value
 }
 
 func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float64, bool) {

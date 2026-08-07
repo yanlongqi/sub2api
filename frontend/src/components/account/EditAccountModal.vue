@@ -1478,6 +1478,30 @@
               @update:model-value="handleUpstreamBillingRateSyncChange"
             />
           </div>
+          <div
+            v-if="account?.type === 'apikey'"
+            class="mt-3"
+          >
+            <label class="input-label">{{ t('admin.accounts.upstreamBilling.rateFactor') }}</label>
+            <input
+              v-model.number="upstreamRateFactor"
+              type="number"
+              min="0"
+              step="0.1"
+              class="input disabled:cursor-not-allowed disabled:opacity-60"
+              data-testid="upstream-rate-factor"
+              :disabled="!upstreamBillingRateSyncEnabled"
+            />
+            <p class="input-hint">
+              {{
+                t(
+                  upstreamBillingRateSyncEnabled
+                    ? 'admin.accounts.upstreamBilling.rateFactorHint'
+                    : 'admin.accounts.upstreamBilling.rateFactorDisabledHint'
+                )
+              }}
+            </p>
+          </div>
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -2863,6 +2887,7 @@ const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
+const upstreamRateFactor = ref(1)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
@@ -3365,6 +3390,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
+  upstreamRateFactor.value =
+    typeof extra?.upstream_rate_factor === 'number' && extra.upstream_rate_factor >= 0
+      ? extra.upstream_rate_factor
+      : 1
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
@@ -4155,6 +4184,7 @@ const handleSubmit = async () => {
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
+        updatePayload.upstream_rate_factor = upstreamRateFactor.value
       }
     }
 

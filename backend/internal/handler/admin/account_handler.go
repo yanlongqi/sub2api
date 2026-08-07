@@ -155,6 +155,7 @@ type UpdateAccountRequest struct {
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
 	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled"`
+	UpstreamRateFactor      *float64       `json:"upstream_rate_factor"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
@@ -174,6 +175,7 @@ type BulkUpdateAccountsRequest struct {
 	Credentials             map[string]any            `json:"credentials"`
 	Extra                   map[string]any            `json:"extra"`
 	ProbeEnabled            *bool                     `json:"upstream_billing_probe_enabled"`
+	UpstreamRateFactor      *float64                  `json:"upstream_rate_factor"`
 	ConfirmMixedChannelRisk *bool                     `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
@@ -997,6 +999,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		ProbeEnabled:          req.ProbeEnabled,
 		RateSyncEnabled:       req.RateSyncEnabled,
+		UpstreamRateFactor:    req.UpstreamRateFactor,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
@@ -2085,7 +2088,8 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		req.GroupIDs != nil ||
 		len(req.Credentials) > 0 ||
 		len(req.Extra) > 0 ||
-		req.ProbeEnabled != nil
+		req.ProbeEnabled != nil ||
+		req.UpstreamRateFactor != nil
 
 	if !hasUpdates {
 		response.BadRequest(c, "No updates provided")
@@ -2107,6 +2111,7 @@ func (h *AccountHandler) BulkUpdate(c *gin.Context) {
 		Credentials:           req.Credentials,
 		Extra:                 req.Extra,
 		ProbeEnabled:          req.ProbeEnabled,
+		UpstreamRateFactor:    req.UpstreamRateFactor,
 		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
