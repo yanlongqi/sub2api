@@ -264,10 +264,10 @@ export default {
         batchPartial: 'Probe partially completed: {success} succeeded, {failed} failed'
       },
       upstreamQuotaSync: {
-        manualRefresh: 'Sync upstream quota now',
-        refreshLabel: 'Sync',
-        refreshSuccess: 'Upstream quota synced',
-        refreshFailed: 'Failed to sync upstream quota',
+        manualRefresh: 'Query upstream quota now',
+        refreshLabel: 'Query',
+        refreshSuccess: 'Upstream quota queried',
+        refreshFailed: 'Failed to query upstream quota',
         unsupported: 'Upstream does not support quota query'
       },
       allPrivacyModes: 'All Privacy States',

@@ -217,10 +217,10 @@ export default {
         batchPartial: '倍率探测部分完成：成功 {success} 个，失败 {failed} 个'
       },
       upstreamQuotaSync: {
-        manualRefresh: '立即同步上游配额',
-        refreshLabel: '同步',
-        refreshSuccess: '上游配额已同步',
-        refreshFailed: '同步上游配额失败',
+        manualRefresh: '立即查询上游配额',
+        refreshLabel: '查询',
+        refreshSuccess: '上游配额已查询',
+        refreshFailed: '查询上游配额失败',
         unsupported: '上游不支持配额查询'
       },
       allPrivacyModes: '全部Privacy状态',
