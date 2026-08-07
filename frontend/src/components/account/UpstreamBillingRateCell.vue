@@ -29,6 +29,8 @@
             }}
           </p>
           <p>{{ t('admin.accounts.upstreamBilling.effectiveRate', { value: currentEffectiveRate ?? '-' }) }}</p>
+          <p>{{ t('admin.accounts.upstreamBilling.rateFactorLabel', { value: upstreamRateFactor }) }}</p>
+          <p>{{ t('admin.accounts.upstreamBilling.schedulingRateLabel', { value: schedulingRate ?? '-' }) }}</p>
           <p>{{ t('admin.accounts.upstreamBilling.updatedAt', { value: formatDate(snapshot?.received_at) }) }}</p>
         </template>
         <template v-else-if="stale && lastDetectedRate != null">
@@ -111,6 +113,15 @@ const eligible = computed(() => props.account.type === 'apikey')
 const snapshot = computed<UpstreamBillingProbeSnapshot | undefined>(() => props.account.extra?.upstream_billing_probe)
 const data = computed(() => snapshot.value?.data)
 const probeEnabled = computed(() => props.account.extra?.upstream_billing_probe_enabled === true)
+const upstreamRateFactor = computed(() => {
+  const v = props.account.extra?.upstream_rate_factor
+  return typeof v === 'number' && v >= 0 ? v : 1
+})
+const schedulingRate = computed(() => {
+  const base = data.value?.resolved_rate_multiplier
+  if (typeof base !== 'number' || !Number.isFinite(base) || base < 0) return null
+  return Number((base * upstreamRateFactor.value).toPrecision(12))
+})
 const nextProbeAt = computed(() => {
   const value = snapshot.value?.next_probe_at
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : ''
