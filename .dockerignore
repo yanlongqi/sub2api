@@ -35,6 +35,11 @@ build/
 frontend/node_modules/
 node_modules/
 
+# Local pnpm workspace manifest (side effect of pnpm approve-builds on dev
+# machines; must not enter the image — pnpm 9 errors on the missing packages
+# field). The Docker build pins pnpm 9 and does not need build-script approval.
+frontend/pnpm-workspace.yaml
+
 # Go build cache (will be built in container)
 backend/vendor/
 
