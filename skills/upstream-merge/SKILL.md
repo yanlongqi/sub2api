@@ -161,9 +161,9 @@ cd ..
 ```
 
 pnpm 11.17 may block on `ERR_PNPM_IGNORED_BUILDS` (esbuild, vue-demi). Run
-`pnpm approve-builds` and select all. Note: this creates `pnpm-workspace.yaml`
-and mutates `pnpm-lock.yaml` as a local side effect — after the merge commit,
-revert them:
+`pnpm approve-builds --all` (non-interactive) to approve them. Note: this
+creates `frontend/pnpm-workspace.yaml` and mutates `pnpm-lock.yaml` as a local
+side effect — after the merge commit, revert them:
 
 ```powershell
 git checkout -- frontend/pnpm-lock.yaml
@@ -171,6 +171,13 @@ Remove-Item -ErrorAction SilentlyContinue frontend/pnpm-workspace.yaml
 ```
 
 Do not commit those local-only changes.
+
+**Docker build note:** The Dockerfile pins pnpm 9 (`corepack prepare pnpm@9`),
+which treats any `pnpm-workspace.yaml` as a workspace manifest requiring a
+`packages` field. If the local `pnpm-workspace.yaml` leaks into the build
+context (via `COPY frontend/`), `pnpm run build` fails with `packages field
+missing or empty`. This is now mitigated by `.dockerignore` excluding
+`frontend/pnpm-workspace.yaml`, but always clean it up after typecheck anyway.
 
 ### 5. Commit the merge
 
