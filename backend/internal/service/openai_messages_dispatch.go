@@ -106,7 +106,13 @@ func (g *Group) ResolveMessagesDispatchModel(requestedModel string) string {
 }
 
 func sanitizeGroupMessagesDispatchFields(g *Group) {
-	if g == nil || g.Platform == PlatformOpenAI {
+	if g == nil {
+		return
+	}
+	// OpenAI 与 Composite 平台都允许 /v1/messages 调度：
+	// - OpenAI 分组原生支持；
+	// - Composite 分组可通过路由把请求调度到 openai 目标平台。
+	if g.Platform == PlatformOpenAI || g.Platform == PlatformComposite {
 		return
 	}
 	g.AllowMessagesDispatch = false
