@@ -105,23 +105,24 @@ type UpstreamQuotaSyncWindow struct {
 // UpstreamQuotaSyncService 周期性调用上游 sub2api 的 /v1/usage，
 // 把订阅/余额数据归一化成 quota_limit/quota_used 写回账号 extra。
 type UpstreamQuotaSyncService struct {
-	accountRepo        AccountRepository
-	accountTestService *AccountTestService
-	cfg                intervalSource
+	accountRepo               AccountRepository
+	accountTestService        *AccountTestService
+	cfg                       intervalSource
 	securityAllowInsecureHTTP func() bool
 
-	parentCtx    context.Context
-	parentCancel context.CancelFunc
-	wg           sync.WaitGroup
-	mu           sync.Mutex
-	started      bool
-	stopped      bool
-	cycleMu      sync.Mutex
-	syncGroup    singleflight.Group
-	syncSlots    chan struct{}
-	now          func() time.Time
-	lockCache    LeaderLockCache
-	instanceID   string
+	parentCtx      context.Context
+	parentCancel   context.CancelFunc
+	wg             sync.WaitGroup
+	mu             sync.Mutex
+	started        bool
+	stopped        bool
+	cycleMu        sync.Mutex
+	syncGroup      singleflight.Group
+	syncSlots      chan struct{}
+	now            func() time.Time
+	lockCache      LeaderLockCache
+	instanceID     string
+	quotaProviders *upstreamQuotaProviderRegistry
 }
 
 // intervalSource 由 wire 注入，复用 token_refresh.check_interval_minutes。
@@ -165,6 +166,7 @@ func NewUpstreamQuotaSyncService(
 		syncSlots:          make(chan struct{}, upstreamQuotaSyncConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
+		quotaProviders:     newUpstreamQuotaProviderRegistry(deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
 	}
 }
 
@@ -386,7 +388,8 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		}
 		proxyURL = account.Proxy.URL()
 	}
-	syncURL := strings.TrimRight(normalizedBaseURL, "/") + "/v1/usage"
+	provider := s.quotaProviders.Resolve(normalizedBaseURL)
+	syncURL := provider.UsageURL(normalizedBaseURL)
 	syncCtx, cancel := context.WithTimeout(ctx, upstreamQuotaSyncRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(syncCtx, http.MethodGet, syncURL, bytes.NewReader(nil))
@@ -421,7 +424,7 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return s.persistSyncFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "http_error")
 	}
-	parsed, parseErr := parseUpstreamQuotaUsageResponse(body)
+	parsed, parseErr := provider.ParseResponse(body)
 	if parseErr != nil {
 		return s.persistSyncFailure(ctx, account, intervalMinutes, now, resp.StatusCode, "invalid_response")
 	}
