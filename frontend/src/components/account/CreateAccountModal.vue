@@ -5421,8 +5421,7 @@ const handleSubmit = async () => {
   }
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
-  // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数
-  // 的通用路径（直接 doCreateAccount），不经过 createAccountAndFinish。
+  // 额度/余额探测，按 api_protocol 路由转发端点与格式。
   if (form.platform === 'kimi' || form.platform === 'zhipu' || form.platform === 'deepseek') {
     credentials.account_mode = accountMode.value
     credentials.api_protocol = apiProtocol.value
@@ -5478,20 +5477,15 @@ const handleSubmit = async () => {
   }
 
   applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-  if (!applyTempUnschedConfig(credentials)) {
-    return
-  }
 
   form.credentials = credentials
   const extra = buildAnthropicExtra(buildOpenAIExtra())
 
-  await doCreateAccount({
-    ...form,
-    group_ids: form.group_ids,
-    extra,
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
-    auto_pause_on_expired: autoPauseOnExpired.value
-  })
+  // 统一走 createAccountAndFinish：注入配额限制/固定重置/配额通知/同步上游配额
+  // 开关（此前直连 doCreateAccount 会丢弃 QuotaLimitCard 的全部配置）。
+  // applyTempUnschedConfig / OpenAI capabilities / Grok base_url 默认值由
+  // helper 内部处理，此处不再重复调用。
+  await createAccountAndFinish(form.platform, 'apikey', credentials, extra)
 }
 
 const goBackToBasicInfo = () => {
