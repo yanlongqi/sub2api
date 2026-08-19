@@ -107,6 +107,7 @@ func parseDeepSeekBalanceResponse(body []byte) (parsedUpstreamQuotaUsage, error)
 	}
 	var typed struct {
 		BalanceInfos []struct {
+			Currency     string `json:"currency"`
 			TotalBalance string `json:"total_balance"`
 		} `json:"balance_infos"`
 	}
@@ -117,12 +118,16 @@ func parseDeepSeekBalanceResponse(body []byte) (parsedUpstreamQuotaUsage, error)
 		return parsedUpstreamQuotaUsage{}, fmt.Errorf("deepseek balance response has no balance_infos")
 	}
 	var total float64
+	currency := ""
 	for _, info := range typed.BalanceInfos {
 		value, err := strconv.ParseFloat(info.TotalBalance, 64)
 		if err != nil {
 			return parsedUpstreamQuotaUsage{}, fmt.Errorf("deepseek total_balance %q invalid: %w", info.TotalBalance, err)
 		}
 		total += value
+		if currency == "" && info.Currency != "" {
+			currency = info.Currency
+		}
 	}
-	return parsedUpstreamQuotaUsage{raw: raw, balance: &total}, nil
+	return parsedUpstreamQuotaUsage{raw: raw, balance: &total, currency: currency}, nil
 }

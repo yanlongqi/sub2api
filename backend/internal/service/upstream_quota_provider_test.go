@@ -78,6 +78,7 @@ func TestDeepSeekQuotaProviderParsesAllBalances(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, parsed.balance)
 	require.InDelta(t, 7.5, *parsed.balance, 0.000001)
+	require.Equal(t, "CNY", parsed.currency)
 }
 
 func TestDeepSeekQuotaProviderRejectsMissingOrInvalidBalance(t *testing.T) {
@@ -88,4 +89,27 @@ func TestDeepSeekQuotaProviderRejectsMissingOrInvalidBalance(t *testing.T) {
 
 	_, err = provider.ParseResponse([]byte(`{"balance_infos":[{"total_balance":"not-a-number"}]}`))
 	require.Error(t, err)
+}
+
+func TestParseUpstreamQuotaUsageResponseExtractsBalanceAndUnit(t *testing.T) {
+	parsed, err := parseUpstreamQuotaUsageResponse([]byte(`{
+		"mode": "unrestricted",
+		"isValid": true,
+		"planName": "钱包余额",
+		"remaining": 28.2,
+		"unit": "CNY",
+		"balance": 28.2
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, parsed.balance)
+	require.InDelta(t, 28.2, *parsed.balance, 0.000001)
+	require.Equal(t, "CNY", parsed.currency)
+}
+
+func TestNormalizeUpstreamQuotaCurrencyDefaultsToCNY(t *testing.T) {
+	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency(""))
+	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("  "))
+	require.Equal(t, "USD", normalizeUpstreamQuotaCurrency("usd"))
+	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("cny"))
 }

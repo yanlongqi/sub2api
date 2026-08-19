@@ -634,6 +634,16 @@
         color="purple"
       />
 
+      <!-- 上游余额模式：在配额进度条后显示账户余额与货币单位 -->
+      <div
+        v-if="upstreamBalanceDisplay"
+        class="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400"
+      >
+        <span class="rounded bg-emerald-50 px-1 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+          {{ upstreamBalanceDisplay }}
+        </span>
+      </div>
+
       <!-- 手动刷新上游配额同步（仅当账号启用了同步上游配额时显示）。 -->
       <!-- 样式复用 OpenAIQuotaResetCell 的「次数」按钮与 activeQuery 按钮：图标 + 文字标签。 -->
       <button
@@ -1594,6 +1604,16 @@ const quotaTotalBar = computed((): QuotaBarInfo | null => {
   const limit = props.account.quota_limit ?? 0
   if (limit <= 0) return null
   return makeQuotaBar(props.account.quota_used ?? 0, limit)
+})
+
+// 上游配额同步快照：余额模式下在进度条后显示账户余额与货币单位（如 CNY 28.2）。
+const upstreamBalanceDisplay = computed(() => {
+  const snapshot = props.account.extra?.upstream_quota_sync
+  if (!snapshot || snapshot.mode !== 'balance') return null
+  const balance = snapshot.balance
+  if (balance == null || !Number.isFinite(balance)) return null
+  const currency = (snapshot.currency || 'CNY').trim().toUpperCase()
+  return `${currency} ${formatGrokMoney(balance)}`
 })
 
 const handleQuotaResetAccountUpdated = (account: Account) => {

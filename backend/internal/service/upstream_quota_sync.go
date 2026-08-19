@@ -70,6 +70,8 @@ type UpstreamQuotaSyncSnapshot struct {
 	Subscription *UpstreamQuotaSyncSubscription `json:"subscription,omitempty"`
 	// 余额模式下表示账户余额（remaining）。
 	Balance         *float64    `json:"balance,omitempty"`
+	// 余额模式的货币单位（上游 unit 字段，如 CNY/USD；空时前端默认 CNY）。
+	Currency        string      `json:"currency,omitempty"`
 	ReceivedAt      *time.Time  `json:"received_at,omitempty"`
 	LastAttemptAt   time.Time   `json:"last_attempt_at"`
 	NextSyncAt      time.Time   `json:"next_sync_at"`
@@ -464,10 +466,11 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		}
 		snapshot.Subscription = sub
 	}
-	// 余额模式：填充 balance 字段，前端按余额显示。
+	// 余额模式：填充 balance 字段与货币单位，前端按余额显示。
 	if mode == UpstreamQuotaSyncModeBalance && parsed.balance != nil {
 		bal := *parsed.balance
 		snapshot.Balance = &bal
+		snapshot.Currency = normalizeUpstreamQuotaCurrency(parsed.currency)
 	}
 	if err := s.persistSnapshot(ctx, account, snapshot); err != nil {
 		return nil, err
@@ -519,6 +522,15 @@ func previousMode(previous *UpstreamQuotaSyncSnapshot) string {
 		return ""
 	}
 	return previous.Mode
+}
+
+// normalizeUpstreamQuotaCurrency 归一化余额货币单位：上游未返回时默认 CNY。
+func normalizeUpstreamQuotaCurrency(currency string) string {
+	c := strings.ToUpper(strings.TrimSpace(currency))
+	if c == "" {
+		return "CNY"
+	}
+	return c
 }
 
 // persistSnapshot 把快照写入 extra[upstream_quota_sync]，并把归一化的 quota_limit/quota_used
@@ -619,6 +631,7 @@ type upstreamQuotaUsageRaw struct {
 	Mode         string  `json:"mode"`
 	IsValid      bool    `json:"isValid"`
 	Remaining    float64 `json:"remaining"`
+	Unit         string  `json:"unit"`
 	Quota        *struct {
 		Limit     float64 `json:"limit"`
 		Used      float64 `json:"used"`
@@ -641,6 +654,7 @@ type upstreamQuotaUsageRaw struct {
 type parsedUpstreamQuotaUsage struct {
 	raw       map[string]any
 	mode      string
+	currency  string
 	quota     *struct {
 		Limit     float64
 		Used      float64
@@ -671,7 +685,7 @@ func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, err
 		return parsedUpstreamQuotaUsage{}, err
 	}
 	typed.raw = raw
-	out := parsedUpstreamQuotaUsage{raw: raw, mode: typed.Mode}
+	out := parsedUpstreamQuotaUsage{raw: raw, mode: typed.Mode, currency: typed.Unit}
 	if typed.Quota != nil {
 		out.quota = &struct {
 			Limit     float64

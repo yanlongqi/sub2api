@@ -1088,6 +1088,7 @@ export interface UpstreamQuotaSyncSnapshot {
   remaining?: number
   subscription?: UpstreamQuotaSyncSubscription
   balance?: number
+  currency?: string
   received_at?: string
   last_attempt_at: string
   next_sync_at: string
