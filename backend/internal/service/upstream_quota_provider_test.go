@@ -25,6 +25,10 @@ func (p testUpstreamQuotaProvider) UsageURL(baseURL string) string {
 	return baseURL
 }
 
+func (p testUpstreamQuotaProvider) AuthorizationHeader(apiKey string) string {
+	return "Bearer " + apiKey
+}
+
 func (p testUpstreamQuotaProvider) ParseResponse([]byte) (parsedUpstreamQuotaUsage, error) {
 	return parsedUpstreamQuotaUsage{}, nil
 }
@@ -112,4 +116,66 @@ func TestNormalizeUpstreamQuotaCurrencyDefaultsToCNY(t *testing.T) {
 	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("  "))
 	require.Equal(t, "USD", normalizeUpstreamQuotaCurrency("usd"))
 	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("cny"))
+}
+
+func TestZhipuQuotaProviderMatchesOnlyZhipuDomains(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	require.True(t, provider.Matches("https://open.bigmodel.cn/api/paas/v4"))
+	require.True(t, provider.Matches("https://api.z.ai/api/paas/v4"))
+	require.True(t, provider.Matches("https://bigmodel.cn"))
+	require.True(t, provider.Matches("https://z.ai"))
+	require.False(t, provider.Matches("https://evilbigmodel.cn"))
+	require.False(t, provider.Matches("https://bigmodel.cn.evil.example"))
+	require.False(t, provider.Matches("https://api.deepseek.com"))
+	require.False(t, provider.Matches("https://example.com"))
+}
+
+func TestZhipuQuotaProviderBuildsQuotaURLPerDomain(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	require.Equal(t, "https://open.bigmodel.cn/api/monitor/usage/quota/limit", provider.UsageURL("https://open.bigmodel.cn/api/paas/v4"))
+	require.Equal(t, "https://api.z.ai/api/monitor/usage/quota/limit", provider.UsageURL("https://api.z.ai/api/paas/v4"))
+}
+
+func TestZhipuQuotaProviderAuthorizationHeaderOmitsBearer(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+	require.Equal(t, "sk-123", provider.AuthorizationHeader("sk-123"))
+}
+
+func TestZhipuQuotaProviderParsesTwoWindows(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	parsed, err := provider.ParseResponse([]byte(`{
+		"success": true,
+		"data": {
+			"level": "pro",
+			"limits": [
+				{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 26.0, "nextResetTime": 1774967594803},
+				{"type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 5.0, "nextResetTime": 1780143594803}
+			]
+		}
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, parsed.zhipu)
+	require.Equal(t, "pro", parsed.zhipu.Level)
+	require.InDelta(t, 26.0, parsed.zhipu.FiveHourPercent, 0.000001)
+	require.NotEmpty(t, parsed.zhipu.FiveHourResetAt)
+	require.InDelta(t, 5.0, parsed.zhipu.WeeklyPercent, 0.000001)
+	require.NotEmpty(t, parsed.zhipu.WeeklyResetAt)
+}
+
+func TestZhipuQuotaProviderRejectsBusinessError(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	_, err := provider.ParseResponse([]byte(`{"success": false, "msg": "invalid api key"}`))
+	require.Error(t, err)
+}
+
+func TestZhipuQuotaProviderRejectsMissingData(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	_, err := provider.ParseResponse([]byte(`{"success": true}`))
+	require.Error(t, err)
 }

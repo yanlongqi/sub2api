@@ -56,6 +56,7 @@ const (
 	UpstreamQuotaSyncModeSubscription = "subscription"
 	UpstreamQuotaSyncModeBalance      = "balance"
 	UpstreamQuotaSyncModeQuotaLimited = "quota_limited"
+	UpstreamQuotaSyncModeZhipu        = "zhipu"
 )
 
 // UpstreamQuotaSyncSnapshot 持久化在 accounts.extra。
@@ -72,12 +73,24 @@ type UpstreamQuotaSyncSnapshot struct {
 	Balance         *float64    `json:"balance,omitempty"`
 	// 余额模式的货币单位（上游 unit 字段，如 CNY/USD；空时前端默认 CNY）。
 	Currency        string      `json:"currency,omitempty"`
+	// 智谱模式：Coding Plan 滚动窗口已用百分比（5h + weekly 双窗口）。
+	Zhipu           *UpstreamQuotaSyncZhipuQuota `json:"zhipu,omitempty"`
 	ReceivedAt      *time.Time  `json:"received_at,omitempty"`
 	LastAttemptAt   time.Time   `json:"last_attempt_at"`
 	NextSyncAt      time.Time   `json:"next_sync_at"`
 	FailureCount    int         `json:"failure_count,omitempty"`
 	HTTPStatus      int         `json:"http_status,omitempty"`
 	LastError       string      `json:"last_error,omitempty"`
+}
+
+// UpstreamQuotaSyncZhipuQuota 是智谱 Coding Plan 配额的双窗口快照（已用百分比）。
+// 5h 为 5 小时滚动窗口，weekly 为每周窗口；reset_at 为下次重置时间（RFC3339）。
+type UpstreamQuotaSyncZhipuQuota struct {
+	Level           string  `json:"level,omitempty"`
+	FiveHourPercent float64 `json:"five_hour_percent,omitempty"`
+	FiveHourResetAt string  `json:"five_hour_reset_at,omitempty"`
+	WeeklyPercent   float64 `json:"weekly_percent,omitempty"`
+	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
 }
 
 // UpstreamQuotaSyncSubscription 是上游订阅模式各维度限额/用量/窗口的归一化快照。
@@ -168,7 +181,7 @@ func NewUpstreamQuotaSyncService(
 		syncSlots:          make(chan struct{}, upstreamQuotaSyncConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
-		quotaProviders:     newUpstreamQuotaProviderRegistry(deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
+		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
 	}
 }
 
@@ -399,7 +412,7 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		return s.persistSyncFailure(ctx, account, intervalMinutes, now, 0, "request_build_failed")
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", provider.AuthorizationHeader(apiKey))
 	account.ApplyHeaderOverrides(req.Header)
 	var tlsProfile *tlsfingerprint.Profile
 	if s.accountTestService.tlsFPProfileService != nil {
@@ -471,6 +484,16 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		bal := *parsed.balance
 		snapshot.Balance = &bal
 		snapshot.Currency = normalizeUpstreamQuotaCurrency(parsed.currency)
+	}
+	// 智谱模式：填充 5h + weekly 双窗口快照。
+	if mode == UpstreamQuotaSyncModeZhipu && parsed.zhipu != nil {
+		snapshot.Zhipu = &UpstreamQuotaSyncZhipuQuota{
+			Level:           parsed.zhipu.Level,
+			FiveHourPercent: parsed.zhipu.FiveHourPercent,
+			FiveHourResetAt: parsed.zhipu.FiveHourResetAt,
+			WeeklyPercent:   parsed.zhipu.WeeklyPercent,
+			WeeklyResetAt:   parsed.zhipu.WeeklyResetAt,
+		}
 	}
 	if err := s.persistSnapshot(ctx, account, snapshot); err != nil {
 		return nil, err
@@ -559,6 +582,24 @@ func (s *UpstreamQuotaSyncService) persistSnapshot(ctx context.Context, account 
 				persistSubscriptionWindow(updates, "daily", snapshot.Subscription.Daily)
 				persistSubscriptionWindow(updates, "weekly", snapshot.Subscription.Weekly)
 				persistSubscriptionWindow(updates, "monthly", snapshot.Subscription.Monthly)
+			}
+		} else if snapshot.Mode == UpstreamQuotaSyncModeZhipu {
+			// 智谱百分比配额：不写顶层 quota_limit/quota_used（无绝对额度），
+			// 写 zhipu_5h/weekly 快照键供调度阈值评估（cnProviderThresholdCandidates）复用。
+			updates["quota_limit"] = nil
+			updates["quota_used"] = nil
+			clearSubscriptionWindow(updates, "daily")
+			clearSubscriptionWindow(updates, "weekly")
+			clearSubscriptionWindow(updates, "monthly")
+			if snapshot.Zhipu != nil {
+				updates[cnExtraKey(PlatformZhipu, cnExtraSuffix5hUsed)] = snapshot.Zhipu.FiveHourPercent
+				updates[cnExtraKey(PlatformZhipu, cnExtraSuffixWeeklyUsed)] = snapshot.Zhipu.WeeklyPercent
+				if snapshot.Zhipu.FiveHourResetAt != "" {
+					updates[cnExtraKey(PlatformZhipu, cnExtraSuffix5hReset)] = snapshot.Zhipu.FiveHourResetAt
+				}
+				if snapshot.Zhipu.WeeklyResetAt != "" {
+					updates[cnExtraKey(PlatformZhipu, cnExtraSuffixWeeklyReset)] = snapshot.Zhipu.WeeklyResetAt
+				}
 			}
 		} else {
 			if snapshot.Limit > 0 {
@@ -671,6 +712,16 @@ type parsedUpstreamQuotaUsage struct {
 		ExpiresAt         *string
 	}
 	balance *float64
+	zhipu   *parsedZhipuQuota
+}
+
+// parsedZhipuQuota 是智谱配额响应的解析结果（5h + weekly 双窗口已用百分比）。
+type parsedZhipuQuota struct {
+	Level           string
+	FiveHourPercent float64
+	FiveHourResetAt string
+	WeeklyPercent   float64
+	WeeklyResetAt   string
 }
 
 func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, error) {
@@ -727,6 +778,13 @@ func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, err
 //
 // quota_limited 模式：直接透传 limit/used。
 func computeQuotaFromUsage(parsed parsedUpstreamQuotaUsage, storedLimit float64) (limit, used, remaining float64, mode string) {
+	if parsed.zhipu != nil {
+		mode = UpstreamQuotaSyncModeZhipu
+		// 智谱配额为百分比（无绝对额度），顶层不聚合 quota_limit/quota_used。
+		// 双窗口数据由 snapshot.Zhipu 承载；此处 limit/used/remaining 保持 0，
+		// persistSnapshot 的智谱分支会写 zhipu_* 快照键。
+		return 0, 0, 0, mode
+	}
 	if parsed.subscription != nil && parsed.mode != "quota_limited" {
 		mode = UpstreamQuotaSyncModeSubscription
 		// 订阅模式：limit/used 留给各维度独立展示，顶层不再聚合（避免与月维度重复）。
