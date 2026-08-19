@@ -47,6 +47,9 @@
         {{ displayPercent }}
       </span>
 
+      <!-- 额外内容（如余额）插槽：渲染在百分比后面 -->
+      <slot name="after" />
+
       <!-- Reset time -->
       <span v-if="shouldShowResetTime" class="shrink-0 text-[10px] text-gray-400">
         {{ formatResetTime }}

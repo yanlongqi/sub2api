@@ -245,6 +245,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		CredentialsStatus:       credsStatus,
 		Extra:                   extra,
 		OllamaCloudUsage:        ollamaCloudUsage,
+		UpstreamQuotaSync:       a.GetUpstreamQuotaSyncSnapshot(),
 		ProxyID:                 a.ProxyID,
 		ProxyFallbackOriginID:   a.ProxyFallbackOriginID,
 		ProxyFallbackOriginName: a.ProxyFallbackOriginName,

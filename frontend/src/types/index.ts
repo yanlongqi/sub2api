@@ -1160,6 +1160,7 @@ export interface Account {
   credentials?: Record<string, unknown>
   credentials_status?: Record<string, boolean>
   ollama_cloud_usage?: OllamaCloudUsageState
+  upstream_quota_sync?: UpstreamQuotaSyncSnapshot
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>

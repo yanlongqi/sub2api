@@ -632,17 +632,17 @@
         label="total"
         :utilization="quotaTotalBar.utilization"
         color="purple"
-      />
-
-      <!-- 上游余额模式：在配额进度条后显示账户余额与货币单位 -->
-      <div
-        v-if="upstreamBalanceDisplay"
-        class="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400"
       >
-        <span class="rounded bg-emerald-50 px-1 py-0.5 font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-          {{ upstreamBalanceDisplay }}
-        </span>
-      </div>
+        <!-- 上游余额模式：在 total 进度条同一行的后面显示账户余额与货币单位 -->
+        <template #after>
+          <span
+            v-if="upstreamBalanceDisplay"
+            class="shrink-0 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium leading-none text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+          >
+            {{ upstreamBalanceDisplay }}
+          </span>
+        </template>
+      </UsageProgressBar>
 
       <!-- 手动刷新上游配额同步（仅当账号启用了同步上游配额时显示）。 -->
       <!-- 样式复用 OpenAIQuotaResetCell 的「次数」按钮与 activeQuery 按钮：图标 + 文字标签。 -->
@@ -1607,8 +1607,9 @@ const quotaTotalBar = computed((): QuotaBarInfo | null => {
 })
 
 // 上游配额同步快照：余额模式下在进度条后显示账户余额与货币单位（如 CNY 28.2）。
+// 优先使用 DTO 顶层字段（后端 redact 了 extra 中的快照），兼容旧版 extra 内嵌。
 const upstreamBalanceDisplay = computed(() => {
-  const snapshot = props.account.extra?.upstream_quota_sync
+  const snapshot = props.account.upstream_quota_sync ?? props.account.extra?.upstream_quota_sync
   if (!snapshot || snapshot.mode !== 'balance') return null
   const balance = snapshot.balance
   if (balance == null || !Number.isFinite(balance)) return null

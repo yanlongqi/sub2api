@@ -1441,4 +1441,114 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('7d S')
     expect(wrapper.text()).not.toContain('7d F')
   })
+
+  it('上游余额模式在 total 进度条后显示余额与货币单位', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5001,
+          platform: 'anthropic',
+          type: 'apikey',
+          quota_limit: 28.2,
+          upstream_quota_sync: {
+            status: 'ok',
+            mode: 'balance',
+            balance: 28.2,
+            currency: 'CNY',
+            last_attempt_at: '2026-03-15T00:00:00Z',
+            next_sync_at: '2026-03-15T00:00:00Z'
+          },
+          extra: {}
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'color'],
+            template: '<div class="usage-bar">{{ label }}|<slot name="after" /></div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('CNY 28.2')
+  })
+
+  it('上游余额模式缺少货币单位时默认显示 CNY', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5002,
+          platform: 'anthropic',
+          type: 'apikey',
+          quota_limit: 100,
+          upstream_quota_sync: {
+            status: 'ok',
+            mode: 'balance',
+            balance: 150,
+            last_attempt_at: '2026-03-15T00:00:00Z',
+            next_sync_at: '2026-03-15T00:00:00Z'
+          },
+          extra: {}
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'color'],
+            template: '<div class="usage-bar">{{ label }}|<slot name="after" /></div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('CNY 150')
+  })
+
+  it('上游非余额模式不显示余额', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5003,
+          platform: 'anthropic',
+          type: 'apikey',
+          quota_limit: 50,
+          upstream_quota_sync: {
+            status: 'ok',
+            mode: 'subscription',
+            balance: 12.5,
+            currency: 'CNY',
+            last_attempt_at: '2026-03-15T00:00:00Z',
+            next_sync_at: '2026-03-15T00:00:00Z'
+          },
+          extra: {}
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'color'],
+            template: '<div class="usage-bar">{{ label }}|<slot name="after" /></div>'
+          },
+          AccountQuotaInfo: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('CNY 12.5')
+  })
 })
