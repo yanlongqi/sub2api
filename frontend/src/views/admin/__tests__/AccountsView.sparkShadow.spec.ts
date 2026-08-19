@@ -348,6 +348,58 @@ describe('admin AccountsView — 账号行展示', () => {
     wrapper.unmount()
   })
 
+  it('自定义官网地址优先于 base_url，且非法值回退 base_url origin', async () => {
+    listAccounts.mockResolvedValue({
+      items: [
+        {
+          id: 111,
+          name: 'custom-homepage',
+          platform: 'openai',
+          type: 'apikey',
+          credentials: { base_url: 'https://api.relay.example.com/v1', homepage_url: 'https://console.relay.example.com/pricing' }
+        },
+        {
+          id: 112,
+          name: 'invalid-homepage',
+          platform: 'openai',
+          type: 'apikey',
+          credentials: { base_url: 'https://fallback.example.com/v1', homepage_url: 'javascript:alert(1)' }
+        },
+        {
+          id: 113,
+          name: 'no-homepage',
+          platform: 'openai',
+          type: 'apikey',
+          credentials: { base_url: 'https://plain.example.com/v1' }
+        }
+      ],
+      total: 3,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = mountViewWithRow()
+    await flushPromises()
+
+    const links = wrapper.findAll('a')
+    expect(links).toHaveLength(3)
+
+    // 自定义官网地址：完整 URL（保留路径），优先于 base_url
+    expect(links[0].text()).toBe('custom-homepage')
+    expect(links[0].attributes('href')).toBe('https://console.relay.example.com/pricing')
+
+    // 非法自定义地址被 sanitizeUrl 拒绝：回退 base_url origin
+    expect(links[1].text()).toBe('invalid-homepage')
+    expect(links[1].attributes('href')).toBe('https://fallback.example.com')
+
+    // 未填写自定义地址：维持 base_url origin 行为
+    expect(links[2].text()).toBe('no-homepage')
+    expect(links[2].attributes('href')).toBe('https://plain.example.com')
+
+    wrapper.unmount()
+  })
+
   it('prefers persisted Grok JWT tier over lagging billing/quota snapshots', async () => {
     const grokAccounts = [
       {

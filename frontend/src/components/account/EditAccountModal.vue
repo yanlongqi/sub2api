@@ -62,6 +62,16 @@
             @select="onCnPresetSelect"
           />
         </div>
+        <div>
+          <label class="input-label">{{ t('admin.accounts.homepageUrl') }}</label>
+          <input
+            v-model="editHomepageUrl"
+            type="text"
+            class="input"
+            :placeholder="t('admin.accounts.homepageUrlPlaceholder')"
+          />
+          <p class="input-hint">{{ t('admin.accounts.homepageUrlHint') }}</p>
+        </div>
         <!-- Account Mode Selection (CN providers) -->
         <div v-if="isCNApiKeyAccount">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
@@ -2912,6 +2922,8 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+// 自定义官网地址：选填，填写后账号列表点击账号名跳转该地址而非 base_url
+const editHomepageUrl = ref('')
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）account_mode / api_protocol 编辑 ──
 // account_mode 决定额度/余额监控路径，api_protocol 决定转发端点与格式；
@@ -3827,6 +3839,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
               ? defaultCNBaseUrl(newAccount.platform, editAccountMode.value, editApiProtocol.value)
               : 'https://api.anthropic.com'
     editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
+    // 回填自定义官网地址（留空表示未设置，列表回退 base_url origin）
+    editHomepageUrl.value = (credentials.homepage_url as string) || ''
 
     // Load model mappings and detect mode
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
@@ -4493,6 +4507,14 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = {
         ...currentCredentials,
         base_url: newBaseUrl
+      }
+
+      // 自定义官网地址：填写则更新，清空则移除（回退 base_url origin）
+      const newHomepageUrl = editHomepageUrl.value.trim()
+      if (newHomepageUrl) {
+        newCredentials.homepage_url = newHomepageUrl
+      } else {
+        delete newCredentials.homepage_url
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。

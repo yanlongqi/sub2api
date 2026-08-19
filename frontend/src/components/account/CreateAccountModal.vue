@@ -1275,6 +1275,16 @@
           />
         </div>
         <div>
+          <label class="input-label">{{ t('admin.accounts.homepageUrl') }}</label>
+          <input
+            v-model="apiKeyHomepageUrl"
+            type="text"
+            class="input"
+            :placeholder="t('admin.accounts.homepageUrlPlaceholder')"
+          />
+          <p class="input-hint">{{ t('admin.accounts.homepageUrlHint') }}</p>
+        </div>
+        <div>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
@@ -3924,6 +3934,8 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+// 自定义官网地址：选填，填写后账号列表点击账号名跳转该地址而非 base_url
+const apiKeyHomepageUrl = ref('')
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -5415,6 +5427,11 @@ const handleSubmit = async () => {
   const credentials: Record<string, unknown> = {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  // 自定义官网地址：留空则不写入，列表点击账号名回退 base_url origin
+  const homepageUrl = apiKeyHomepageUrl.value.trim()
+  if (homepageUrl) {
+    credentials.homepage_url = homepageUrl
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value

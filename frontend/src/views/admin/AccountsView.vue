@@ -1624,7 +1624,14 @@ function accountDisplayEmail(row: any): string {
 }
 
 function accountHomepageUrl(row: Account): string {
-  if (row.type !== 'apikey' || typeof row.credentials?.base_url !== 'string') return ''
+  if (row.type !== 'apikey') return ''
+  // 优先使用自定义官网地址（credentials.homepage_url），未填写则回退 base_url 的 origin
+  const customHomepage = typeof row.credentials?.homepage_url === 'string' ? row.credentials.homepage_url : ''
+  if (customHomepage) {
+    const sanitized = sanitizeUrl(customHomepage)
+    if (sanitized) return sanitized
+  }
+  if (typeof row.credentials?.base_url !== 'string') return ''
   const baseUrl = sanitizeUrl(row.credentials.base_url)
   return baseUrl ? new URL(baseUrl).origin : ''
 }
