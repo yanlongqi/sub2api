@@ -62,10 +62,10 @@ func TestDeepSeekQuotaProviderMatchesOnlyDeepSeekDomains(t *testing.T) {
 	require.False(t, provider.Matches("https://deepseek.example.com"))
 }
 
-func TestDeepSeekQuotaProviderBuildsBalanceURL(t *testing.T) {
+func TestDeepSeekQuotaProviderUsesFixedBalanceURL(t *testing.T) {
 	provider := deepSeekQuotaProvider{}
 
-	require.Equal(t, "https://api.deepseek.com/user/balance", provider.UsageURL("https://api.deepseek.com/"))
+	require.Equal(t, "https://api.deepseek.com/user/balance", provider.UsageURL("https://tenant.deepseek.com/custom/path"))
 }
 
 func TestDeepSeekQuotaProviderParsesAllBalances(t *testing.T) {
@@ -118,24 +118,24 @@ func TestNormalizeUpstreamQuotaCurrencyDefaultsToCNY(t *testing.T) {
 	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("cny"))
 }
 
-func TestZhipuQuotaProviderMatchesOnlyZhipuDomains(t *testing.T) {
+func TestZhipuQuotaProviderMatchesOnlyOfficialDomains(t *testing.T) {
 	provider := zhipuQuotaProvider{}
 
 	require.True(t, provider.Matches("https://open.bigmodel.cn/api/paas/v4"))
 	require.True(t, provider.Matches("https://api.z.ai/api/paas/v4"))
-	require.True(t, provider.Matches("https://bigmodel.cn"))
-	require.True(t, provider.Matches("https://z.ai"))
+	require.False(t, provider.Matches("https://bigmodel.cn"))
+	require.False(t, provider.Matches("https://z.ai"))
 	require.False(t, provider.Matches("https://evilbigmodel.cn"))
-	require.False(t, provider.Matches("https://bigmodel.cn.evil.example"))
+	require.False(t, provider.Matches("https://open.bigmodel.cn.evil.example"))
 	require.False(t, provider.Matches("https://api.deepseek.com"))
 	require.False(t, provider.Matches("https://example.com"))
 }
 
-func TestZhipuQuotaProviderBuildsQuotaURLPerDomain(t *testing.T) {
+func TestZhipuQuotaProviderUsesFixedOfficialURLs(t *testing.T) {
 	provider := zhipuQuotaProvider{}
 
-	require.Equal(t, "https://open.bigmodel.cn/api/monitor/usage/quota/limit", provider.UsageURL("https://open.bigmodel.cn/api/paas/v4"))
-	require.Equal(t, "https://api.z.ai/api/monitor/usage/quota/limit", provider.UsageURL("https://api.z.ai/api/paas/v4"))
+	require.Equal(t, "https://open.bigmodel.cn/api/monitor/usage/quota/limit", provider.UsageURL("https://open.bigmodel.cn/custom/path"))
+	require.Equal(t, "https://api.z.ai/api/monitor/usage/quota/limit", provider.UsageURL("https://api.z.ai/custom/path"))
 }
 
 func TestZhipuQuotaProviderAuthorizationHeaderOmitsBearer(t *testing.T) {
@@ -164,6 +164,30 @@ func TestZhipuQuotaProviderParsesTwoWindows(t *testing.T) {
 	require.NotEmpty(t, parsed.zhipu.FiveHourResetAt)
 	require.InDelta(t, 5.0, parsed.zhipu.WeeklyPercent, 0.000001)
 	require.NotEmpty(t, parsed.zhipu.WeeklyResetAt)
+}
+
+func TestZhipuQuotaProviderParsesPeriodLimit(t *testing.T) {
+	provider := zhipuQuotaProvider{}
+
+	// 老套餐形态：TIME_LIMIT（订阅周期额度）+ 单条 TOKENS_LIMIT（5h）。
+	parsed, err := provider.ParseResponse([]byte(`{
+		"success": true,
+		"data": {
+			"level": "max",
+			"limits": [
+				{"type": "TIME_LIMIT", "unit": 5, "number": 1, "usage": 4000, "remaining": 3890, "percentage": 2, "currentValue": 110, "nextResetTime": 1789207208997},
+				{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 34, "nextResetTime": 1787136499883}
+			]
+		}
+	}`))
+
+	require.NoError(t, err)
+	require.NotNil(t, parsed.zhipu)
+	require.Equal(t, "max", parsed.zhipu.Level)
+	require.InDelta(t, 34.0, parsed.zhipu.FiveHourPercent, 0.000001)
+	require.InDelta(t, 2.0, parsed.zhipu.PeriodPercent, 0.000001)
+	require.NotEmpty(t, parsed.zhipu.PeriodResetAt)
+	require.Equal(t, 0.0, parsed.zhipu.WeeklyPercent)
 }
 
 func TestZhipuQuotaProviderRejectsBusinessError(t *testing.T) {

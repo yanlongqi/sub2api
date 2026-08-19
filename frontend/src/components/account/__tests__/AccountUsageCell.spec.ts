@@ -1551,4 +1551,46 @@ describe('AccountUsageCell', () => {
 
     expect(wrapper.text()).not.toContain('CNY 12.5')
   })
+
+  it('智谱上游配额模式展示 5h 与每周双窗口百分比', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5004,
+          platform: 'zhipu',
+          type: 'apikey',
+          upstream_quota_sync: {
+            status: 'ok',
+            mode: 'zhipu',
+            zhipu: {
+              level: 'pro',
+              five_hour_percent: 26,
+              five_hour_reset_at: '2026-08-19T10:00:00Z',
+              weekly_percent: 5,
+              weekly_reset_at: '2026-08-24T00:00:00Z'
+            },
+            last_attempt_at: '2026-08-19T00:00:00Z',
+            next_sync_at: '2026-08-19T00:05:00Z'
+          },
+          extra: {}
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          AccountQuotaInfo: true,
+          CNProviderQuotaCell: true,
+          CNProviderBalanceCell: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('5h')
+    expect(wrapper.text()).toContain('26%')
+    expect(wrapper.text()).toContain('7d')
+    expect(wrapper.text()).toContain('5%')
+  })
 })

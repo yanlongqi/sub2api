@@ -83,14 +83,17 @@ type UpstreamQuotaSyncSnapshot struct {
 	LastError       string      `json:"last_error,omitempty"`
 }
 
-// UpstreamQuotaSyncZhipuQuota 是智谱 Coding Plan 配额的双窗口快照（已用百分比）。
-// 5h 为 5 小时滚动窗口，weekly 为每周窗口；reset_at 为下次重置时间（RFC3339）。
+// UpstreamQuotaSyncZhipuQuota 是智谱 Coding Plan 配额的多窗口快照（已用百分比）。
+// 5h 为 5 小时滚动窗口，weekly 为每周窗口（新套餐），period 为订阅周期额度
+// （TIME_LIMIT，如 MCP 工具额度）；reset_at 为下次重置时间（RFC3339）。
 type UpstreamQuotaSyncZhipuQuota struct {
 	Level           string  `json:"level,omitempty"`
 	FiveHourPercent float64 `json:"five_hour_percent,omitempty"`
 	FiveHourResetAt string  `json:"five_hour_reset_at,omitempty"`
 	WeeklyPercent   float64 `json:"weekly_percent,omitempty"`
 	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
+	PeriodPercent   float64 `json:"period_percent,omitempty"`
+	PeriodResetAt   string  `json:"period_reset_at,omitempty"`
 }
 
 // UpstreamQuotaSyncSubscription 是上游订阅模式各维度限额/用量/窗口的归一化快照。
@@ -485,7 +488,7 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		snapshot.Balance = &bal
 		snapshot.Currency = normalizeUpstreamQuotaCurrency(parsed.currency)
 	}
-	// 智谱模式：填充 5h + weekly 双窗口快照。
+	// 智谱模式：填充 5h + weekly + 订阅周期多窗口快照。
 	if mode == UpstreamQuotaSyncModeZhipu && parsed.zhipu != nil {
 		snapshot.Zhipu = &UpstreamQuotaSyncZhipuQuota{
 			Level:           parsed.zhipu.Level,
@@ -493,6 +496,8 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 			FiveHourResetAt: parsed.zhipu.FiveHourResetAt,
 			WeeklyPercent:   parsed.zhipu.WeeklyPercent,
 			WeeklyResetAt:   parsed.zhipu.WeeklyResetAt,
+			PeriodPercent:   parsed.zhipu.PeriodPercent,
+			PeriodResetAt:   parsed.zhipu.PeriodResetAt,
 		}
 	}
 	if err := s.persistSnapshot(ctx, account, snapshot); err != nil {
@@ -715,13 +720,15 @@ type parsedUpstreamQuotaUsage struct {
 	zhipu   *parsedZhipuQuota
 }
 
-// parsedZhipuQuota 是智谱配额响应的解析结果（5h + weekly 双窗口已用百分比）。
+// parsedZhipuQuota 是智谱配额响应的解析结果（5h + weekly + 订阅周期已用百分比）。
 type parsedZhipuQuota struct {
 	Level           string
 	FiveHourPercent float64
 	FiveHourResetAt string
 	WeeklyPercent   float64
 	WeeklyResetAt   string
+	PeriodPercent   float64
+	PeriodResetAt   string
 }
 
 func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, error) {

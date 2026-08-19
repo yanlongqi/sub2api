@@ -89,8 +89,11 @@ func (deepSeekQuotaProvider) Matches(baseURL string) bool {
 	return host == "deepseek.com" || strings.HasSuffix(host, ".deepseek.com")
 }
 
+const deepSeekQuotaUsageURL = "https://api.deepseek.com/user/balance"
+
 func (deepSeekQuotaProvider) UsageURL(baseURL string) string {
-	return trimUpstreamQuotaBaseURL(baseURL) + "/user/balance"
+	_ = baseURL // baseURL 仅用于域名判断，余额端点固定官方地址
+	return deepSeekQuotaUsageURL
 }
 
 func (deepSeekQuotaProvider) AuthorizationHeader(apiKey string) string {
@@ -102,9 +105,8 @@ func (deepSeekQuotaProvider) ParseResponse(body []byte) (parsedUpstreamQuotaUsag
 }
 
 // zhipuQuotaProvider 查询智谱 Coding Plan 配额（滚动窗口已用百分比）。
-// 端点路径固定为 /api/monitor/usage/quota/limit，主机随 base_url 的域名路由：
-// open.bigmodel.cn 与 api.z.ai 各自使用自己的主机。响应仅含已用百分比（5h + weekly），
-// 无余额/绝对额度，故解析为双窗口快照。
+// baseURL 仅用于域名判断：open.bigmodel.cn → 国内站固定地址，api.z.ai → 国际站固定地址。
+// 响应仅含已用百分比（5h + weekly），无余额/绝对额度，故解析为双窗口快照。
 type zhipuQuotaProvider struct{}
 
 func (zhipuQuotaProvider) Name() string {
@@ -112,17 +114,11 @@ func (zhipuQuotaProvider) Name() string {
 }
 
 func (zhipuQuotaProvider) Matches(baseURL string) bool {
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Hostname() == "" {
-		return false
-	}
-	host := strings.ToLower(u.Hostname())
-	return host == "bigmodel.cn" || strings.HasSuffix(host, ".bigmodel.cn") ||
-		host == "z.ai" || strings.HasSuffix(host, ".z.ai")
+	return zhipuQuotaHostFromBaseURL(baseURL) != ""
 }
 
 func (zhipuQuotaProvider) UsageURL(baseURL string) string {
-	return extractSchemeHost(baseURL) + "/api/monitor/usage/quota/limit"
+	return zhipuQuotaHostFromBaseURL(baseURL) + "/api/monitor/usage/quota/limit"
 }
 
 func (zhipuQuotaProvider) AuthorizationHeader(apiKey string) string {
@@ -134,13 +130,21 @@ func (zhipuQuotaProvider) ParseResponse(body []byte) (parsedUpstreamQuotaUsage, 
 	return parseZhipuQuotaResponse(body)
 }
 
-// extractSchemeHost 从 base_url 提取 scheme://host（用于在域名上拼配额路径）。
-func extractSchemeHost(baseURL string) string {
+// zhipuQuotaHostFromBaseURL 只做域名判断，返回固定官方主机；未命中返回空串。
+func zhipuQuotaHostFromBaseURL(baseURL string) string {
 	u, err := url.Parse(baseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return trimRightSlash(baseURL)
+	if err != nil || u.Hostname() == "" {
+		return ""
 	}
-	return u.Scheme + "://" + u.Host
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case host == "open.bigmodel.cn" || strings.HasSuffix(host, ".open.bigmodel.cn"):
+		return "https://open.bigmodel.cn"
+	case host == "api.z.ai" || strings.HasSuffix(host, ".api.z.ai"):
+		return "https://api.z.ai"
+	default:
+		return ""
+	}
 }
 
 // parseZhipuQuotaResponse 解析智谱 GET /api/monitor/usage/quota/limit 响应。
@@ -175,7 +179,43 @@ func parseZhipuQuotaResponse(body []byte) (parsedUpstreamQuotaUsage, error) {
 			zq.WeeklyResetAt = tier.ResetAt
 		}
 	}
+	// TIME_LIMIT：订阅周期额度（如 MCP 工具额度），带绝对值 usage/remaining 与
+	// 周期重置时间。老套餐无 weekly 窗口时，这是除 5h 外唯一的第二档配额。
+	if period, resetAt, ok := parseZhipuPeriodLimit(data); ok {
+		zq.PeriodPercent = period
+		zq.PeriodResetAt = resetAt
+	}
 	return parsedUpstreamQuotaUsage{raw: raw, zhipu: zq}, nil
+}
+
+// parseZhipuPeriodLimit 解析智谱响应中的 TIME_LIMIT 条目（订阅周期额度）。
+// 返回已用百分比与重置时间；无该条目或字段缺失时 ok=false。
+func parseZhipuPeriodLimit(data gjson.Result) (percent float64, resetAt string, ok bool) {
+	var found gjson.Result
+	data.Get("limits").ForEach(func(_, item gjson.Result) bool {
+		if strings.ToUpper(strings.TrimSpace(item.Get("type").String())) == "TIME_LIMIT" {
+			found = item
+			return false // 取首条 TIME_LIMIT
+		}
+		return true
+	})
+	if !found.Exists() {
+		return 0, "", false
+	}
+	p, valid := cnParseF64(found.Get("percentage").Value())
+	if !valid {
+		return 0, "", false
+	}
+	resetISO := ""
+	if nr := found.Get("nextResetTime"); nr.Exists() {
+		switch nr.Type {
+		case gjson.Number:
+			resetISO = cnMillisToRFC3339(nr.Int())
+		case gjson.String:
+			resetISO = cnNormalizeResetTime(nr.String())
+		}
+	}
+	return p, resetISO, true
 }
 
 func trimUpstreamQuotaBaseURL(baseURL string) string {

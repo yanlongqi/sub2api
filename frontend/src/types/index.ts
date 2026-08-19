@@ -1062,7 +1062,17 @@ export interface UpstreamBillingProbeResult {
 // ==================== Upstream Quota Sync ====================
 
 export type UpstreamQuotaSyncStatus = 'ok' | 'unsupported' | 'failed'
-export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | ''
+export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | 'zhipu' | ''
+
+export interface UpstreamQuotaSyncZhipuQuota {
+  level?: string
+  five_hour_percent?: number
+  five_hour_reset_at?: string
+  weekly_percent?: number
+  weekly_reset_at?: string
+  period_percent?: number
+  period_reset_at?: string
+}
 
 export interface UpstreamQuotaSyncWindow {
   limit: number
@@ -1087,6 +1097,7 @@ export interface UpstreamQuotaSyncSnapshot {
   used?: number
   remaining?: number
   subscription?: UpstreamQuotaSyncSubscription
+  zhipu?: UpstreamQuotaSyncZhipuQuota
   balance?: number
   currency?: string
   received_at?: string

@@ -435,12 +435,34 @@
         <!-- 子单元格各自按 模式×平台 判定可见；两者都不可见时（智谱 payg 无公开
              余额端点、coding 探测也不适用）才回落到占位符。 -->
         <div
-          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible"
+          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible && !upstreamZhipuQuota"
           class="text-xs text-gray-400"
           :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
         >-</div>
-        <CNProviderQuotaCell :account="account" />
-        <CNProviderBalanceCell :account="account" />
+        <CNProviderQuotaCell v-if="!upstreamZhipuQuota" :account="account" />
+        <CNProviderBalanceCell v-if="!upstreamZhipuQuota" :account="account" />
+        <template v-if="upstreamZhipuQuota">
+          <UsageProgressBar
+            label="5h"
+            :utilization="upstreamZhipuFiveHourPercent ?? 0"
+            :resets-at="upstreamZhipuQuota?.five_hour_reset_at || null"
+            color="indigo"
+          />
+          <UsageProgressBar
+            v-if="upstreamZhipuWeeklyPercent != null"
+            label="7d"
+            :utilization="upstreamZhipuWeeklyPercent"
+            :resets-at="upstreamZhipuQuota?.weekly_reset_at || null"
+            color="emerald"
+          />
+          <UsageProgressBar
+            v-if="upstreamZhipuPeriodPercent != null"
+            label="MCP"
+            :utilization="upstreamZhipuPeriodPercent"
+            :resets-at="upstreamZhipuQuota?.period_reset_at || null"
+            color="amber"
+          />
+        </template>
       </div>
     </template>
 
@@ -606,6 +628,28 @@
       </div>
 
       <!-- API Key accounts with quota limits: show progress bars -->
+      <template v-if="upstreamZhipuQuota">
+        <UsageProgressBar
+          label="5h"
+          :utilization="upstreamZhipuFiveHourPercent ?? 0"
+          :resets-at="upstreamZhipuQuota?.five_hour_reset_at || null"
+          color="indigo"
+        />
+        <UsageProgressBar
+          v-if="upstreamZhipuWeeklyPercent != null"
+          label="7d"
+          :utilization="upstreamZhipuWeeklyPercent"
+          :resets-at="upstreamZhipuQuota?.weekly_reset_at || null"
+          color="emerald"
+        />
+        <UsageProgressBar
+          v-if="upstreamZhipuPeriodPercent != null"
+          label="MCP"
+          :utilization="upstreamZhipuPeriodPercent"
+          :resets-at="upstreamZhipuQuota?.period_reset_at || null"
+          color="amber"
+        />
+      </template>
       <UsageProgressBar
         v-if="quotaDailyBar"
         label="1d"
@@ -646,19 +690,20 @@
 
       <!-- 手动刷新上游配额同步（仅当账号启用了同步上游配额时显示）。 -->
       <!-- 样式复用 OpenAIQuotaResetCell 的「次数」按钮与 activeQuery 按钮：图标 + 文字标签。 -->
+      <!-- 逻辑与 OAuth 账号的 activeQuery 一致：组件内自包含调用 + 本地 loading。 -->
       <button
         v-if="showUpstreamQuotaSyncRefresh"
         type="button"
         class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
-        :disabled="props.manualRefreshingUpstreamQuotaSync"
+        :disabled="upstreamQuotaSyncRefreshing"
         :aria-label="t('admin.accounts.upstreamQuotaSync.refreshLabel')"
         :title="t('admin.accounts.upstreamQuotaSync.manualRefresh')"
         data-testid="upstream-quota-sync-refresh"
-        @click="emit('refresh-upstream-quota-sync')"
+        @click="handleRefreshUpstreamQuotaSync"
       >
         <svg
           class="h-2.5 w-2.5"
-          :class="{ 'animate-spin': props.manualRefreshingUpstreamQuotaSync }"
+          :class="{ 'animate-spin': upstreamQuotaSyncRefreshing }"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -675,7 +720,7 @@
 
       <!-- No data at all -->
       <div
-        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !account.ollama_cloud_usage?.eligible"
+        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !upstreamZhipuQuota && !account.ollama_cloud_usage?.eligible"
         class="text-xs text-gray-400"
       >-</div>
     </div>
@@ -711,7 +756,6 @@ const props = withDefaults(
     todayStats?: WindowStats | null
     todayStatsLoading?: boolean
     manualRefreshToken?: number
-    manualRefreshingUpstreamQuotaSync?: boolean
     batchedUsage?: AccountUsageInfo | null
     batchedUsageError?: string | null
     batchedUsageLoading?: boolean
@@ -721,7 +765,6 @@ const props = withDefaults(
     todayStats: null,
     todayStatsLoading: false,
     manualRefreshToken: 0,
-    manualRefreshingUpstreamQuotaSync: false,
     batchedUsage: null,
     batchedUsageError: null,
     batchedUsageLoading: false,
@@ -730,7 +773,6 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-  'refresh-upstream-quota-sync': []
   'account-updated': [account: Account]
   'usage-loaded': [usage: AccountUsageInfo]
 }>()
@@ -1502,6 +1544,24 @@ const loadActiveUsage = async () => {
   }
 }
 
+// 手动触发单账号上游配额同步：与 OAuth 账号的 activeQuery 按钮同构——
+// 组件内自包含调用 + 本地 loading，成功后通过 account-updated 通道回传最新账号。
+const upstreamQuotaSyncRefreshing = ref(false)
+const handleRefreshUpstreamQuotaSync = async () => {
+  if (upstreamQuotaSyncRefreshing.value) return
+  upstreamQuotaSyncRefreshing.value = true
+  try {
+    const result = await adminAPI.accounts.refreshUpstreamQuotaSync(props.account.id)
+    if (result.account) {
+      emit('account-updated', result.account)
+    }
+  } catch (e: any) {
+    console.error('Failed to refresh upstream quota sync:', e)
+  } finally {
+    upstreamQuotaSyncRefreshing.value = false
+  }
+}
+
 // The probe persists upstream quota state; refresh this cell so its compact
 // bars and entitlement status reflect the newly observed snapshot.
 const handleGrokProbed = async () => {
@@ -1616,6 +1676,23 @@ const upstreamBalanceDisplay = computed(() => {
   const currency = (snapshot.currency || 'CNY').trim().toUpperCase()
   return `${currency} ${formatGrokMoney(balance)}`
 })
+
+// 智谱模式：从快照的 zhipu 字段读取 5h/weekly 双窗口已用百分比。
+// 优先使用 DTO 顶层字段（后端 redact 了 extra 中的快照），兼容旧版 extra 内嵌。
+const upstreamZhipuQuota = computed(() => {
+  const snapshot = props.account.upstream_quota_sync ?? props.account.extra?.upstream_quota_sync
+  if (!snapshot || snapshot.mode !== 'zhipu' || !snapshot.zhipu) return null
+  return snapshot.zhipu
+})
+
+const upstreamZhipuPercent = (value: number | undefined | null): number | null => {
+  if (value == null || !Number.isFinite(value)) return null
+  return Math.min(100, Math.max(0, value))
+}
+
+const upstreamZhipuFiveHourPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.five_hour_percent))
+const upstreamZhipuWeeklyPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.weekly_percent))
+const upstreamZhipuPeriodPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.period_percent))
 
 const handleQuotaResetAccountUpdated = (account: Account) => {
   // The reset response already carries authoritative quota and account data.
