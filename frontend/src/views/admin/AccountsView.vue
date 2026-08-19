@@ -1593,6 +1593,14 @@ function getAccountPlanType(row: any): string | undefined {
   if (volcPlanType) {
     return volcPlanType.charAt(0).toUpperCase() + volcPlanType.slice(1)
   }
+  // 智谱 Coding Plan 配额同步快照：data.level（如 lite/pro/max），
+  // 同样首字母大写后经 PlatformTypeBadge 第二行套餐徽章展示。
+  const zhipuPlanType = typeof row.upstream_quota_sync?.zhipu?.level === 'string'
+    ? row.upstream_quota_sync.zhipu.level.trim()
+    : ''
+  if (zhipuPlanType) {
+    return zhipuPlanType.charAt(0).toUpperCase() + zhipuPlanType.slice(1)
+  }
   return firstNonBlankString(row.credentials?.plan_type, row.parent_plan_type)
 }
 
