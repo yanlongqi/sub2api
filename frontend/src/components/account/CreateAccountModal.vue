@@ -2007,6 +2007,9 @@
           :weeklyResetHour="editWeeklyResetHour"
           :resetTimezone="editResetTimezone"
           :syncFromUpstream="editQuotaSyncFromUpstream"
+          :baseUrl="apiKeyBaseUrl"
+          :volcengineAccessKeyId="editVolcengineAccessKeyId"
+          :volcengineSecretAccessKey="editVolcengineSecretAccessKey"
           @update:totalLimit="editQuotaLimit = $event"
           @update:dailyLimit="editQuotaDailyLimit = $event"
           @update:weeklyLimit="editQuotaWeeklyLimit = $event"
@@ -2026,6 +2029,8 @@
           @update:weeklyResetHour="editWeeklyResetHour = $event"
           @update:resetTimezone="editResetTimezone = $event"
           @update:syncFromUpstream="editQuotaSyncFromUpstream = $event"
+          @update:volcengineAccessKeyId="editVolcengineAccessKeyId = $event"
+          @update:volcengineSecretAccessKey="editVolcengineSecretAccessKey = $event"
         />
       </div>
 
@@ -2061,6 +2066,9 @@
           :weeklyResetHour="editWeeklyResetHour"
           :resetTimezone="editResetTimezone"
           :syncFromUpstream="editQuotaSyncFromUpstream"
+          :baseUrl="apiKeyBaseUrl"
+          :volcengineAccessKeyId="editVolcengineAccessKeyId"
+          :volcengineSecretAccessKey="editVolcengineSecretAccessKey"
           @update:totalLimit="editQuotaLimit = $event"
           @update:dailyLimit="editQuotaDailyLimit = $event"
           @update:weeklyLimit="editQuotaWeeklyLimit = $event"
@@ -2080,6 +2088,8 @@
           @update:weeklyResetHour="editWeeklyResetHour = $event"
           @update:resetTimezone="editResetTimezone = $event"
           @update:syncFromUpstream="editQuotaSyncFromUpstream = $event"
+          @update:volcengineAccessKeyId="editVolcengineAccessKeyId = $event"
+          @update:volcengineSecretAccessKey="editVolcengineSecretAccessKey = $event"
         />
       </div>
 
@@ -3933,6 +3943,9 @@ const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
+// 火山方舟控制面 OpenAPI AK/SK（配额同步用，与推理 api_key 分离；存 credentials）
+const editVolcengineAccessKeyId = ref('')
+const editVolcengineSecretAccessKey = ref('')
 const apiKeyValue = ref('')
 // 自定义官网地址：选填，填写后账号列表点击账号名跳转该地址而非 base_url
 const apiKeyHomepageUrl = ref('')
@@ -5592,6 +5605,15 @@ const createAccountAndFinish = async (
     // 同步上游配额开关：仅 apikey 账号（非 bedrock）持久化
     if (type === 'apikey' && editQuotaSyncFromUpstream.value) {
       quotaExtra.upstream_quota_sync_enabled = true
+      // 火山方舟 AK/SK：同步开启且 baseUrl 是火山域名时写入凭据（与推理 api_key 分离）
+      if (/volces\.com/i.test(String(credentials.base_url || ''))) {
+        if (editVolcengineAccessKeyId.value.trim()) {
+          credentials.volcengine_access_key_id = editVolcengineAccessKeyId.value.trim()
+        }
+        if (editVolcengineSecretAccessKey.value.trim()) {
+          credentials.volcengine_secret_access_key = editVolcengineSecretAccessKey.value.trim()
+        }
+      }
     }
     if (Object.keys(quotaExtra).length > 0) {
       finalExtra = quotaExtra

@@ -1927,6 +1927,9 @@
           :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
           :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
           :syncFromUpstream="editQuotaSyncFromUpstream"
+          :baseUrl="editBaseUrl"
+          :volcengineAccessKeyId="editVolcengineAccessKeyId"
+          :volcengineSecretAccessKey="editVolcengineSecretAccessKey"
           @update:totalLimit="editQuotaLimit = $event"
           @update:dailyLimit="editQuotaDailyLimit = $event"
           @update:weeklyLimit="editQuotaWeeklyLimit = $event"
@@ -1946,6 +1949,8 @@
           @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
           @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
           @update:syncFromUpstream="editQuotaSyncFromUpstream = $event"
+          @update:volcengineAccessKeyId="editVolcengineAccessKeyId = $event"
+          @update:volcengineSecretAccessKey="editVolcengineSecretAccessKey = $event"
         />
       </div>
       <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
@@ -1980,6 +1985,9 @@
           :quotaNotifyTotalThreshold="quotaNotifyState.total.threshold"
           :quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType"
           :syncFromUpstream="editQuotaSyncFromUpstream"
+          :baseUrl="editBaseUrl"
+          :volcengineAccessKeyId="editVolcengineAccessKeyId"
+          :volcengineSecretAccessKey="editVolcengineSecretAccessKey"
           @update:totalLimit="editQuotaLimit = $event"
           @update:dailyLimit="editQuotaDailyLimit = $event"
           @update:weeklyLimit="editQuotaWeeklyLimit = $event"
@@ -1999,6 +2007,8 @@
           @update:quotaNotifyTotalThreshold="quotaNotifyState.total.threshold = $event"
           @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
           @update:syncFromUpstream="editQuotaSyncFromUpstream = $event"
+          @update:volcengineAccessKeyId="editVolcengineAccessKeyId = $event"
+          @update:volcengineSecretAccessKey="editVolcengineSecretAccessKey = $event"
         />
       </div>
 
@@ -3182,6 +3192,12 @@ const editWeeklyResetHour = ref<number | null>(null)
 const editResetTimezone = ref<string | null>(null)
 // 同步上游配额二级开关：仅 apikey 账号（非 bedrock）启用
 const editQuotaSyncFromUpstream = ref<boolean>(false)
+// 火山方舟控制面 OpenAPI AK/SK（配额同步用，与推理 api_key 分离；存 credentials）
+const editVolcengineAccessKeyId = ref('')
+const editVolcengineSecretAccessKey = ref('')
+// 后端脱敏后仅能告知“是否已配置”，用于输入框 placeholder 提示
+const editVolcengineAKConfigured = ref(false)
+const editVolcengineSKConfigured = ref(false)
 const codexFingerprintModeOptions = computed(() => [
   { value: 'off' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintOff') },
   { value: 'device' as CodexFingerprintMode, label: t('admin.accounts.openai.codexFingerprintDevice') },
@@ -3730,6 +3746,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     editQuotaSyncFromUpstream.value = newAccount.type === 'apikey'
       ? extra?.upstream_quota_sync_enabled === true
       : false
+    // 火山 AK/SK 回填：后端响应已脱敏（credentials 不含原文），
+    // 仅用 credentials_status.has_* 标记是否已配置；输入框留空表示不修改。
+    const volcCredsStatus = newAccount.credentials_status as Record<string, boolean> | undefined
+    editVolcengineAccessKeyId.value = ''
+    editVolcengineSecretAccessKey.value = ''
+    editVolcengineAKConfigured.value = volcCredsStatus?.has_volcengine_access_key_id === true
+    editVolcengineSKConfigured.value = volcCredsStatus?.has_volcengine_secret_access_key === true
   } else {
     editQuotaLimit.value = null
     editQuotaDailyLimit.value = null
@@ -4521,6 +4544,18 @@ const handleSubmit = async () => {
       if (isCNApiKeyAccount.value) {
         newCredentials.account_mode = editAccountMode.value
         newCredentials.api_protocol = editApiProtocol.value
+      }
+
+      // 火山方舟 AK/SK：填入则覆盖，留空则保留既有（后端 MergePreservingSensitiveCreds 语义）。
+      // 仅当同步上游开启且 baseUrl 是火山域名时写入，避免无关账号携带凭据。
+      const volcengineUpstream = /volces\.com/i.test(newBaseUrl)
+      if (editQuotaSyncFromUpstream.value && volcengineUpstream) {
+        if (editVolcengineAccessKeyId.value.trim()) {
+          newCredentials.volcengine_access_key_id = editVolcengineAccessKeyId.value.trim()
+        }
+        if (editVolcengineSecretAccessKey.value.trim()) {
+          newCredentials.volcengine_secret_access_key = editVolcengineSecretAccessKey.value.trim()
+        }
       }
 
       // Handle API key

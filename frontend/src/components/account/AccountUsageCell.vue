@@ -628,6 +628,28 @@
       </div>
 
       <!-- API Key accounts with quota limits: show progress bars -->
+      <template v-if="upstreamVolcengineQuota">
+        <UsageProgressBar
+          label="5h"
+          :utilization="upstreamVolcengineFiveHourPercent ?? 0"
+          :resets-at="upstreamVolcengineQuota?.five_hour_reset_at || null"
+          color="indigo"
+        />
+        <UsageProgressBar
+          v-if="upstreamVolcengineWeeklyPercent != null"
+          label="7d"
+          :utilization="upstreamVolcengineWeeklyPercent"
+          :resets-at="upstreamVolcengineQuota?.weekly_reset_at || null"
+          color="emerald"
+        />
+        <UsageProgressBar
+          v-if="upstreamVolcengineMonthlyPercent != null"
+          label="30d"
+          :utilization="upstreamVolcengineMonthlyPercent"
+          :resets-at="upstreamVolcengineQuota?.monthly_reset_at || null"
+          color="amber"
+        />
+      </template>
       <template v-if="upstreamZhipuQuota">
         <UsageProgressBar
           label="5h"
@@ -1693,6 +1715,31 @@ const upstreamZhipuPercent = (value: number | undefined | null): number | null =
 const upstreamZhipuFiveHourPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.five_hour_percent))
 const upstreamZhipuWeeklyPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.weekly_percent))
 const upstreamZhipuPeriodPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.period_percent))
+
+// 火山方舟模式：从快照的 volcengine 字段读取 5h/weekly/monthly 窗口。
+// Agent Plan 有绝对额度时优先算百分比（Used/Quota×100），Coding Plan 直接用百分比。
+const upstreamVolcengineQuota = computed(() => {
+  const snapshot = props.account.upstream_quota_sync ?? props.account.extra?.upstream_quota_sync
+  if (!snapshot || snapshot.mode !== 'volcengine' || !snapshot.volcengine) return null
+  return snapshot.volcengine
+})
+
+const upstreamVolcenginePercent = (quota: number | undefined | null, used: number | undefined | null, percent: number | undefined | null): number | null => {
+  if (quota != null && quota > 0 && used != null && Number.isFinite(used)) {
+    return Math.min(100, Math.max(0, (used / quota) * 100))
+  }
+  if (percent != null && Number.isFinite(percent)) {
+    return Math.min(100, Math.max(0, percent))
+  }
+  return null
+}
+
+const upstreamVolcengineFiveHourPercent = computed(() =>
+  upstreamVolcenginePercent(upstreamVolcengineQuota.value?.five_hour_quota, upstreamVolcengineQuota.value?.five_hour_used, upstreamVolcengineQuota.value?.five_hour_percent))
+const upstreamVolcengineWeeklyPercent = computed(() =>
+  upstreamVolcenginePercent(upstreamVolcengineQuota.value?.weekly_quota, upstreamVolcengineQuota.value?.weekly_used, upstreamVolcengineQuota.value?.weekly_percent))
+const upstreamVolcengineMonthlyPercent = computed(() =>
+  upstreamVolcenginePercent(upstreamVolcengineQuota.value?.monthly_quota, upstreamVolcengineQuota.value?.monthly_used, upstreamVolcengineQuota.value?.monthly_percent))
 
 const handleQuotaResetAccountUpdated = (account: Account) => {
   // The reset response already carries authoritative quota and account data.

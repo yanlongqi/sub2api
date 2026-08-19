@@ -1584,6 +1584,15 @@ function getAccountPlanType(row: any): string | undefined {
       row.parent_plan_type
     )
   }
+  // 火山方舟配额同步快照（OpenAI Key + ark base URL）：GetAFPUsage Result.PlanType
+  // （如 pro/lite/max），首字母大写后经 PlatformTypeBadge 第二行套餐徽章展示
+  // （与 Codex OAuth 的 Plus/Pro 徽章同位置）。
+  const volcPlanType = typeof row.upstream_quota_sync?.volcengine?.plan_type === 'string'
+    ? row.upstream_quota_sync.volcengine.plan_type.trim()
+    : ''
+  if (volcPlanType) {
+    return volcPlanType.charAt(0).toUpperCase() + volcPlanType.slice(1)
+  }
   return firstNonBlankString(row.credentials?.plan_type, row.parent_plan_type)
 }
 

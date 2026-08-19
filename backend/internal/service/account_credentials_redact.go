@@ -12,6 +12,8 @@ var SensitiveCredentialKeys = []string{
 	// 云服务凭据
 	"aws_secret_access_key", "aws_session_token",
 	"service_account_json", "service_account", "private_key",
+	// 火山方舟控制面 OpenAPI AK/SK（配额同步用，与推理 api_key 分离）
+	"volcengine_secret_access_key",
 }
 
 var sensitiveCredentialKeySet = func() map[string]struct{} {

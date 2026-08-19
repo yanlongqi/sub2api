@@ -262,6 +262,14 @@ const planBadgeClass = computed(() => {
   if (normalizedPlanType.value === 'pro' || normalizedPlanType.value === 'chatgptpro') {
     return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300'
   }
+  // 火山方舟 Agent Plan 档位（GetAFPUsage Result.PlanType）：
+  // lite 入门档 → cyan；max 顶配档 → purple（与 pro 的 violet 形成梯度）。
+  if (normalizedPlanType.value === 'lite') {
+    return 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300'
+  }
+  if (normalizedPlanType.value === 'max') {
+    return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+  }
   return typeClass.value
 })
 

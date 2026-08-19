@@ -27,6 +27,9 @@ const props = withDefaults(defineProps<{
   quotaNotifyTotalThreshold?: number | null
   quotaNotifyTotalThresholdType?: QuotaThresholdType | null
   syncFromUpstream?: boolean
+  baseUrl?: string | null
+  volcengineAccessKeyId?: string | null
+  volcengineSecretAccessKey?: string | null
 }>(), {
   quotaNotifyGlobalEnabled: false,
   quotaNotifyDailyEnabled: null,
@@ -39,6 +42,9 @@ const props = withDefaults(defineProps<{
   quotaNotifyTotalThreshold: null,
   quotaNotifyTotalThresholdType: null,
   syncFromUpstream: false,
+  baseUrl: null,
+  volcengineAccessKeyId: null,
+  volcengineSecretAccessKey: null,
 })
 
 const emit = defineEmits<{
@@ -61,6 +67,8 @@ const emit = defineEmits<{
   'update:quotaNotifyTotalThreshold': [value: number | null]
   'update:quotaNotifyTotalThresholdType': [value: QuotaThresholdType | null]
   'update:syncFromUpstream': [value: boolean]
+  'update:volcengineAccessKeyId': [value: string]
+  'update:volcengineSecretAccessKey': [value: string]
 }>()
 
 const enabled = computed(() =>
@@ -73,6 +81,25 @@ const enabled = computed(() =>
 const localEnabled = ref(enabled.value)
 const localSyncFromUpstream = ref<boolean>(props.syncFromUpstream ?? false)
 const collapsed = ref(false)
+
+// 火山方舟 AK/SK：控制面 OpenAPI 配额查询凭据（与推理 api_key 分离）。
+// 仅当 baseUrl 是火山 ark 域名且同步上游开启时展示。
+const isVolcengineUpstream = computed(() => {
+  const u = (props.baseUrl || '').toLowerCase()
+  return u.includes('volces.com')
+})
+const showVolcengineCredentials = computed(() =>
+  isVolcengineUpstream.value && localSyncFromUpstream.value
+)
+const localVolcengineAccessKeyId = ref(props.volcengineAccessKeyId || '')
+const localVolcengineSecretAccessKey = ref(props.volcengineSecretAccessKey || '')
+
+watch(() => props.volcengineAccessKeyId, (val) => {
+  localVolcengineAccessKeyId.value = val || ''
+})
+watch(() => props.volcengineSecretAccessKey, (val) => {
+  localVolcengineSecretAccessKey.value = val || ''
+})
 
 // Sync when props change externally
 watch(enabled, (val) => {
@@ -299,6 +326,36 @@ const dailyFixedHint = computed(() =>
         <p v-if="localSyncFromUpstream" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           {{ t('admin.accounts.quotaSyncUpstreamActiveHint') }}
         </p>
+
+        <!-- 火山方舟 AK/SK：控制面 OpenAPI 配额查询凭据（仅 ark.*.volces.com 上游且同步开启时展示） -->
+        <div v-if="showVolcengineCredentials" class="mt-2 space-y-2 border-t border-gray-200 pt-3 dark:border-dark-600">
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.quotaSyncVolcengineHint') }}
+          </p>
+          <div>
+            <label class="input-label" data-testid="volcengine-ak-id-label">{{ t('admin.accounts.quotaSyncVolcengineAccessKeyId') }}</label>
+            <input
+              v-model="localVolcengineAccessKeyId"
+              type="text"
+              class="input"
+              data-testid="volcengine-access-key-id-input"
+              :placeholder="t('admin.accounts.quotaSyncVolcengineAccessKeyIdPlaceholder')"
+              @input="emit('update:volcengineAccessKeyId', localVolcengineAccessKeyId)"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.quotaSyncVolcengineSecretAccessKey') }}</label>
+            <input
+              v-model="localVolcengineSecretAccessKey"
+              type="password"
+              autocomplete="new-password"
+              class="input"
+              data-testid="volcengine-secret-access-key-input"
+              :placeholder="t('admin.accounts.quotaSyncVolcengineSecretAccessKeyPlaceholder')"
+              @input="emit('update:volcengineSecretAccessKey', localVolcengineSecretAccessKey)"
+            />
+          </div>
+        </div>
       </div>
   </div>
 </template>

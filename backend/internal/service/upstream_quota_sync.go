@@ -57,6 +57,7 @@ const (
 	UpstreamQuotaSyncModeBalance      = "balance"
 	UpstreamQuotaSyncModeQuotaLimited = "quota_limited"
 	UpstreamQuotaSyncModeZhipu        = "zhipu"
+	UpstreamQuotaSyncModeVolcengine   = "volcengine"
 )
 
 // UpstreamQuotaSyncSnapshot 持久化在 accounts.extra。
@@ -75,6 +76,8 @@ type UpstreamQuotaSyncSnapshot struct {
 	Currency        string      `json:"currency,omitempty"`
 	// 智谱模式：Coding Plan 滚动窗口已用百分比（5h + weekly 双窗口）。
 	Zhipu           *UpstreamQuotaSyncZhipuQuota `json:"zhipu,omitempty"`
+	// 火山方舟模式：Agent Plan（绝对额度）/ Coding Plan（百分比）多窗口快照。
+	Volcengine      *UpstreamQuotaSyncVolcengineQuota `json:"volcengine,omitempty"`
 	ReceivedAt      *time.Time  `json:"received_at,omitempty"`
 	LastAttemptAt   time.Time   `json:"last_attempt_at"`
 	NextSyncAt      time.Time   `json:"next_sync_at"`
@@ -94,6 +97,26 @@ type UpstreamQuotaSyncZhipuQuota struct {
 	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
 	PeriodPercent   float64 `json:"period_percent,omitempty"`
 	PeriodResetAt   string  `json:"period_reset_at,omitempty"`
+}
+
+// UpstreamQuotaSyncVolcengineQuota 是火山方舟配额的多窗口快照。
+// Agent Plan（GetAFPUsage）：各窗口回绝对额度 Quota/Used（AFP 值）+ 已用百分比；
+// Coding Plan（GetCodingPlanUsage）：各窗口仅回已用百分比（Quota/Used 为 0）。
+// reset_at 为下次重置时间（RFC3339）。
+type UpstreamQuotaSyncVolcengineQuota struct {
+	PlanType        string  `json:"plan_type,omitempty"`
+	FiveHourQuota   float64 `json:"five_hour_quota,omitempty"`
+	FiveHourUsed    float64 `json:"five_hour_used,omitempty"`
+	FiveHourPercent float64 `json:"five_hour_percent,omitempty"`
+	FiveHourResetAt string  `json:"five_hour_reset_at,omitempty"`
+	WeeklyQuota     float64 `json:"weekly_quota,omitempty"`
+	WeeklyUsed      float64 `json:"weekly_used,omitempty"`
+	WeeklyPercent   float64 `json:"weekly_percent,omitempty"`
+	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
+	MonthlyQuota    float64 `json:"monthly_quota,omitempty"`
+	MonthlyUsed     float64 `json:"monthly_used,omitempty"`
+	MonthlyPercent  float64 `json:"monthly_percent,omitempty"`
+	MonthlyResetAt  string  `json:"monthly_reset_at,omitempty"`
 }
 
 // UpstreamQuotaSyncSubscription 是上游订阅模式各维度限额/用量/窗口的归一化快照。
@@ -184,7 +207,7 @@ func NewUpstreamQuotaSyncService(
 		syncSlots:          make(chan struct{}, upstreamQuotaSyncConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
-		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
+		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, volcengineQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
 	}
 }
 
@@ -407,6 +430,10 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		proxyURL = account.Proxy.URL()
 	}
 	provider := s.quotaProviders.Resolve(normalizedBaseURL)
+	// 火山方舟：控制面 OpenAPI 走 AK/SK 签名 POST，与通用 GET + Bearer 流程不同。
+	if volcProvider, ok := provider.(volcengineQuotaProvider); ok {
+		return s.syncVolcengineAccount(ctx, account, intervalMinutes, now, normalizedBaseURL, proxyURL, volcProvider)
+	}
 	syncURL := provider.UsageURL(normalizedBaseURL)
 	syncCtx, cancel := context.WithTimeout(ctx, upstreamQuotaSyncRequestTimeout)
 	defer cancel()
@@ -504,6 +531,132 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		return nil, err
 	}
 	return snapshot, nil
+}
+
+// syncVolcengineAccount 同步火山方舟账号配额：控制面 OpenAPI（AK/SK 签名 POST）。
+// 探测顺序：先 GetAFPUsage（Agent Plan，绝对额度），未订阅再 GetCodingPlanUsage
+// （Coding Plan，百分比）。两个 plan 共用同一份 AK/SK，鉴权类错误直接停。
+func (s *UpstreamQuotaSyncService) syncVolcengineAccount(
+	ctx context.Context,
+	account *Account,
+	intervalMinutes int,
+	now time.Time,
+	normalizedBaseURL string,
+	proxyURL string,
+	_ volcengineQuotaProvider,
+) (*UpstreamQuotaSyncSnapshot, error) {
+	accessKeyID := strings.TrimSpace(account.GetCredential(VolcengineAccessKeyIDCredentialKey))
+	secretAccessKey := strings.TrimSpace(account.GetCredential(VolcengineSecretAccessKeyCredentialKey))
+	if accessKeyID == "" || secretAccessKey == "" {
+		return s.persistSyncFailure(ctx, account, intervalMinutes, now, 0, "missing_volcengine_credentials")
+	}
+	region := volcengineRegionFromBaseURL(normalizedBaseURL)
+	if region == "" {
+		return s.persistSyncFailure(ctx, account, intervalMinutes, now, 0, "invalid_base_url")
+	}
+	var (
+		parsed    parsedUpstreamQuotaUsage
+		httpStats int
+		hit       bool
+	)
+	for _, action := range []string{volcengineActionAFPUsage, volcengineActionCodingPlan} {
+		body, statusCode, err := s.callVolcengineOpenAPI(ctx, account, region, accessKeyID, secretAccessKey, action, proxyURL)
+		if err != nil {
+			return s.persistSyncFailure(ctx, account, intervalMinutes, now, statusCode, err.Error())
+		}
+		httpStats = statusCode
+		candidate, parseErr := parseVolcengineQuotaResponse(body)
+		if parseErr != nil {
+			// 鉴权类错误（AK/SK 无效）直接停，不再试另一个 plan。
+			if code, _, ok := volcengineResponseError(body); ok && volcengineIsAuthErrorCode(code) {
+				return s.persistSyncFailure(ctx, account, intervalMinutes, now, statusCode, "volcengine_auth_failed")
+			}
+			continue
+		}
+		parsed = candidate
+		hit = true
+		break
+	}
+	if !hit {
+		return s.persistSyncFailure(ctx, account, intervalMinutes, now, httpStats, "invalid_response")
+	}
+	limit, used, remaining, mode := computeQuotaFromUsage(parsed, account.GetQuotaLimit())
+	snapshot := &UpstreamQuotaSyncSnapshot{
+		Status:     UpstreamQuotaSyncStatusOK,
+		Mode:       mode,
+		Data:       parsed.raw,
+		Limit:      limit,
+		Used:       used,
+		Remaining:  remaining,
+		ReceivedAt: probeTimePtr(now),
+		LastAttemptAt: now,
+		NextSyncAt:  now.Add(nextSyncDelay(intervalMinutes, 0)),
+		HTTPStatus:  httpStats,
+	}
+	if mode == UpstreamQuotaSyncModeVolcengine && parsed.volcengine != nil {
+		snapshot.Volcengine = &UpstreamQuotaSyncVolcengineQuota{
+			PlanType:        parsed.volcengine.PlanType,
+			FiveHourQuota:   parsed.volcengine.FiveHourQuota,
+			FiveHourUsed:    parsed.volcengine.FiveHourUsed,
+			FiveHourPercent: parsed.volcengine.FiveHourPercent,
+			FiveHourResetAt: parsed.volcengine.FiveHourResetAt,
+			WeeklyQuota:     parsed.volcengine.WeeklyQuota,
+			WeeklyUsed:      parsed.volcengine.WeeklyUsed,
+			WeeklyPercent:   parsed.volcengine.WeeklyPercent,
+			WeeklyResetAt:   parsed.volcengine.WeeklyResetAt,
+			MonthlyQuota:    parsed.volcengine.MonthlyQuota,
+			MonthlyUsed:     parsed.volcengine.MonthlyUsed,
+			MonthlyPercent:  parsed.volcengine.MonthlyPercent,
+			MonthlyResetAt:  parsed.volcengine.MonthlyResetAt,
+		}
+	}
+	if err := s.persistSnapshot(ctx, account, snapshot); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+// callVolcengineOpenAPI 发起一次火山控制面 OpenAPI 签名调用，返回响应体与状态码。
+// 传输失败返回 err（reason 直接进 persistSyncFailure）。
+func (s *UpstreamQuotaSyncService) callVolcengineOpenAPI(
+	ctx context.Context,
+	account *Account,
+	region, accessKeyID, secretAccessKey, action, proxyURL string,
+) ([]byte, int, error) {
+	syncCtx, cancel := context.WithTimeout(ctx, upstreamQuotaSyncRequestTimeout)
+	defer cancel()
+	req, err := volcengineBuildSignedRequest(region, accessKeyID, secretAccessKey, action, s.currentTime())
+	if err != nil {
+		return nil, 0, fmt.Errorf("request_build_failed")
+	}
+	req = req.WithContext(syncCtx)
+	account.ApplyHeaderOverrides(req.Header)
+	var tlsProfile *tlsfingerprint.Profile
+	if s.accountTestService.tlsFPProfileService != nil {
+		tlsProfile = s.accountTestService.tlsFPProfileService.ResolveTLSProfile(account)
+	}
+	resp, err := s.accountTestService.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request_failed")
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, 0, fmt.Errorf("empty_response")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, upstreamQuotaSyncMaxBodyBytes+1))
+	if readErr != nil {
+		return nil, resp.StatusCode, fmt.Errorf("response_read_failed")
+	}
+	if len(body) > upstreamQuotaSyncMaxBodyBytes {
+		return nil, resp.StatusCode, fmt.Errorf("response_too_large")
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return nil, resp.StatusCode, fmt.Errorf("unsupported")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, fmt.Errorf("http_error")
+	}
+	return body, resp.StatusCode, nil
 }
 
 func (s *UpstreamQuotaSyncService) persistSyncFailure(
@@ -604,6 +757,24 @@ func (s *UpstreamQuotaSyncService) persistSnapshot(ctx context.Context, account 
 				}
 				if snapshot.Zhipu.WeeklyResetAt != "" {
 					updates[cnExtraKey(PlatformZhipu, cnExtraSuffixWeeklyReset)] = snapshot.Zhipu.WeeklyResetAt
+				}
+			}
+		} else if snapshot.Mode == UpstreamQuotaSyncModeVolcengine {
+			// 火山方舟多窗口配额：不写顶层 quota_limit/quota_used（无单一总额概念），
+			// 写 volcengine_5h/weekly 快照键供调度阈值评估与前端展示。
+			updates["quota_limit"] = nil
+			updates["quota_used"] = nil
+			clearSubscriptionWindow(updates, "daily")
+			clearSubscriptionWindow(updates, "weekly")
+			clearSubscriptionWindow(updates, "monthly")
+			if snapshot.Volcengine != nil {
+				updates[cnExtraKey(PlatformVolcengine, cnExtraSuffix5hUsed)] = snapshot.Volcengine.FiveHourPercent
+				updates[cnExtraKey(PlatformVolcengine, cnExtraSuffixWeeklyUsed)] = snapshot.Volcengine.WeeklyPercent
+				if snapshot.Volcengine.FiveHourResetAt != "" {
+					updates[cnExtraKey(PlatformVolcengine, cnExtraSuffix5hReset)] = snapshot.Volcengine.FiveHourResetAt
+				}
+				if snapshot.Volcengine.WeeklyResetAt != "" {
+					updates[cnExtraKey(PlatformVolcengine, cnExtraSuffixWeeklyReset)] = snapshot.Volcengine.WeeklyResetAt
 				}
 			}
 		} else {
@@ -716,8 +887,26 @@ type parsedUpstreamQuotaUsage struct {
 		WeeklyWindowStart *string
 		ExpiresAt         *string
 	}
-	balance *float64
-	zhipu   *parsedZhipuQuota
+	balance    *float64
+	zhipu      *parsedZhipuQuota
+	volcengine *parsedVolcengineQuota
+}
+
+// parsedVolcengineQuota 是火山方舟配额响应的解析结果（多窗口绝对额度/百分比）。
+type parsedVolcengineQuota struct {
+	PlanType        string
+	FiveHourQuota   float64
+	FiveHourUsed    float64
+	FiveHourPercent float64
+	FiveHourResetAt string
+	WeeklyQuota     float64
+	WeeklyUsed      float64
+	WeeklyPercent   float64
+	WeeklyResetAt   string
+	MonthlyQuota    float64
+	MonthlyUsed     float64
+	MonthlyPercent  float64
+	MonthlyResetAt  string
 }
 
 // parsedZhipuQuota 是智谱配额响应的解析结果（5h + weekly + 订阅周期已用百分比）。
@@ -785,6 +974,13 @@ func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, err
 //
 // quota_limited 模式：直接透传 limit/used。
 func computeQuotaFromUsage(parsed parsedUpstreamQuotaUsage, storedLimit float64) (limit, used, remaining float64, mode string) {
+	if parsed.volcengine != nil {
+		mode = UpstreamQuotaSyncModeVolcengine
+		// 火山方舟配额为多窗口绝对额度/百分比，顶层不聚合 quota_limit/quota_used。
+		// 双窗口数据由 snapshot.Volcengine 承载；此处 limit/used/remaining 保持 0，
+		// persistSnapshot 的火山分支会写 volcengine_* 快照键。
+		return 0, 0, 0, mode
+	}
 	if parsed.zhipu != nil {
 		mode = UpstreamQuotaSyncModeZhipu
 		// 智谱配额为百分比（无绝对额度），顶层不聚合 quota_limit/quota_used。
