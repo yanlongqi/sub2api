@@ -152,6 +152,9 @@ const planLabel = computed(() => {
       return 'X Basic'
     case 'abnormal':
       return t('admin.accounts.subscriptionAbnormal')
+    case 'go':
+      // OpenCode Zen Go 订阅（固定档位）
+      return 'Go'
     default:
       return props.planType
   }
@@ -269,6 +272,10 @@ const planBadgeClass = computed(() => {
   }
   if (normalizedPlanType.value === 'max') {
     return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+  }
+  // OpenCode Zen Go 订阅（固定档位）→ amber（与 OpenAI emerald 平台徽章区分）。
+  if (normalizedPlanType.value === 'go') {
+    return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
   }
   return typeClass.value
 })

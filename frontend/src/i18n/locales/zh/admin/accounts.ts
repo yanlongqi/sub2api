@@ -277,6 +277,7 @@ export default {
       quotaSyncVolcengineAccessKeyIdPlaceholder: 'AKLT…',
       quotaSyncVolcengineSecretAccessKey: 'Secret Access Key',
       quotaSyncVolcengineSecretAccessKeyPlaceholder: '留空表示不修改已保存的 Secret',
+      quotaSyncOpenCodeHint: '检测到 OpenCode Zen Go 订阅上游：配额查询直接复用推理 API Key（GET /zen/go/v1/usage），无需额外凭据；同步 5 小时 / 周 / 月三窗口已用百分比。',
       quotaDailyLimit: '日限额',
       quotaDailyLimitHint: '从首次使用起每 24 小时自动重置。',
       quotaWeeklyLimit: '周限额',

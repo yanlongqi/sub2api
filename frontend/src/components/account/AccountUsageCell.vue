@@ -672,6 +672,28 @@
           color="amber"
         />
       </template>
+      <template v-if="upstreamOpenCodeQuota">
+        <UsageProgressBar
+          label="5h"
+          :utilization="upstreamOpenCodeFiveHourPercent ?? 0"
+          :resets-at="upstreamOpenCodeQuota?.five_hour_reset_at || null"
+          color="indigo"
+        />
+        <UsageProgressBar
+          v-if="upstreamOpenCodeWeeklyPercent != null"
+          label="7d"
+          :utilization="upstreamOpenCodeWeeklyPercent"
+          :resets-at="upstreamOpenCodeQuota?.weekly_reset_at || null"
+          color="emerald"
+        />
+        <UsageProgressBar
+          v-if="upstreamOpenCodeMonthlyPercent != null"
+          label="30d"
+          :utilization="upstreamOpenCodeMonthlyPercent"
+          :resets-at="upstreamOpenCodeQuota?.monthly_reset_at || null"
+          color="amber"
+        />
+      </template>
       <UsageProgressBar
         v-if="quotaDailyBar"
         label="1d"
@@ -1740,6 +1762,23 @@ const upstreamVolcengineWeeklyPercent = computed(() =>
   upstreamVolcenginePercent(upstreamVolcengineQuota.value?.weekly_quota, upstreamVolcengineQuota.value?.weekly_used, upstreamVolcengineQuota.value?.weekly_percent))
 const upstreamVolcengineMonthlyPercent = computed(() =>
   upstreamVolcenginePercent(upstreamVolcengineQuota.value?.monthly_quota, upstreamVolcengineQuota.value?.monthly_used, upstreamVolcengineQuota.value?.monthly_percent))
+
+// OpenCode Zen Go 模式：从快照的 opencode 字段读取 rolling/weekly/monthly 三窗口已用百分比。
+// 订阅类型固定为 Go（无多档位），百分比直接使用。
+const upstreamOpenCodeQuota = computed(() => {
+  const snapshot = props.account.upstream_quota_sync ?? props.account.extra?.upstream_quota_sync
+  if (!snapshot || snapshot.mode !== 'opencode' || !snapshot.opencode) return null
+  return snapshot.opencode
+})
+
+const upstreamOpenCodePercent = (value: number | undefined | null): number | null => {
+  if (value == null || !Number.isFinite(value)) return null
+  return Math.min(100, Math.max(0, value))
+}
+
+const upstreamOpenCodeFiveHourPercent = computed(() => upstreamOpenCodePercent(upstreamOpenCodeQuota.value?.five_hour_percent))
+const upstreamOpenCodeWeeklyPercent = computed(() => upstreamOpenCodePercent(upstreamOpenCodeQuota.value?.weekly_percent))
+const upstreamOpenCodeMonthlyPercent = computed(() => upstreamOpenCodePercent(upstreamOpenCodeQuota.value?.monthly_percent))
 
 const handleQuotaResetAccountUpdated = (account: Account) => {
   // The reset response already carries authoritative quota and account data.

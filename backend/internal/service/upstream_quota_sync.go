@@ -58,6 +58,7 @@ const (
 	UpstreamQuotaSyncModeQuotaLimited = "quota_limited"
 	UpstreamQuotaSyncModeZhipu        = "zhipu"
 	UpstreamQuotaSyncModeVolcengine   = "volcengine"
+	UpstreamQuotaSyncModeOpenCode     = "opencode"
 )
 
 // UpstreamQuotaSyncSnapshot 持久化在 accounts.extra。
@@ -78,6 +79,8 @@ type UpstreamQuotaSyncSnapshot struct {
 	Zhipu           *UpstreamQuotaSyncZhipuQuota `json:"zhipu,omitempty"`
 	// 火山方舟模式：Agent Plan（绝对额度）/ Coding Plan（百分比）多窗口快照。
 	Volcengine      *UpstreamQuotaSyncVolcengineQuota `json:"volcengine,omitempty"`
+	// OpenCode Zen Go 订阅模式：rolling/weekly/monthly 三窗口已用百分比。
+	OpenCode        *UpstreamQuotaSyncOpenCodeQuota `json:"opencode,omitempty"`
 	ReceivedAt      *time.Time  `json:"received_at,omitempty"`
 	LastAttemptAt   time.Time   `json:"last_attempt_at"`
 	NextSyncAt      time.Time   `json:"next_sync_at"`
@@ -103,6 +106,19 @@ type UpstreamQuotaSyncZhipuQuota struct {
 // Agent Plan（GetAFPUsage）：各窗口回绝对额度 Quota/Used（AFP 值）+ 已用百分比；
 // Coding Plan（GetCodingPlanUsage）：各窗口仅回已用百分比（Quota/Used 为 0）。
 // reset_at 为下次重置时间（RFC3339）。
+// UpstreamQuotaSyncOpenCodeQuota 是 OpenCode Zen Go 订阅配额的多窗口快照
+// （GET /zen/go/v1/usage，三窗口仅回已用百分比；reset_at 为 RFC3339）。
+// percent 字段不用 omitempty：新订阅全 0 时也要序列化（0 是有效值），
+// 否则前端 v-if 判空会漏渲染 7d/30d 进度条。
+type UpstreamQuotaSyncOpenCodeQuota struct {
+	FiveHourPercent float64 `json:"five_hour_percent"`
+	FiveHourResetAt string  `json:"five_hour_reset_at,omitempty"`
+	WeeklyPercent   float64 `json:"weekly_percent"`
+	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
+	MonthlyPercent  float64 `json:"monthly_percent"`
+	MonthlyResetAt  string  `json:"monthly_reset_at,omitempty"`
+}
+
 type UpstreamQuotaSyncVolcengineQuota struct {
 	PlanType        string  `json:"plan_type,omitempty"`
 	FiveHourQuota   float64 `json:"five_hour_quota,omitempty"`
@@ -207,7 +223,7 @@ func NewUpstreamQuotaSyncService(
 		syncSlots:          make(chan struct{}, upstreamQuotaSyncConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
-		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, volcengineQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
+		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, volcengineQuotaProvider{}, openCodeZenGoQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
 	}
 }
 
@@ -527,6 +543,17 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 			PeriodResetAt:   parsed.zhipu.PeriodResetAt,
 		}
 	}
+	// OpenCode Zen Go 模式：填充 rolling/weekly/monthly 三窗口快照。
+	if mode == UpstreamQuotaSyncModeOpenCode && parsed.opencode != nil {
+		snapshot.OpenCode = &UpstreamQuotaSyncOpenCodeQuota{
+			FiveHourPercent: parsed.opencode.FiveHourPercent,
+			FiveHourResetAt: parsed.opencode.FiveHourResetAt,
+			WeeklyPercent:   parsed.opencode.WeeklyPercent,
+			WeeklyResetAt:   parsed.opencode.WeeklyResetAt,
+			MonthlyPercent:  parsed.opencode.MonthlyPercent,
+			MonthlyResetAt:  parsed.opencode.MonthlyResetAt,
+		}
+	}
 	if err := s.persistSnapshot(ctx, account, snapshot); err != nil {
 		return nil, err
 	}
@@ -777,6 +804,24 @@ func (s *UpstreamQuotaSyncService) persistSnapshot(ctx context.Context, account 
 					updates[cnExtraKey(PlatformVolcengine, cnExtraSuffixWeeklyReset)] = snapshot.Volcengine.WeeklyResetAt
 				}
 			}
+		} else if snapshot.Mode == UpstreamQuotaSyncModeOpenCode {
+			// OpenCode Zen Go 订阅配额：不写顶层 quota_limit/quota_used（无绝对额度），
+			// 写 opencode_5h/weekly 快照键供调度阈值评估与前端展示。
+			updates["quota_limit"] = nil
+			updates["quota_used"] = nil
+			clearSubscriptionWindow(updates, "daily")
+			clearSubscriptionWindow(updates, "weekly")
+			clearSubscriptionWindow(updates, "monthly")
+			if snapshot.OpenCode != nil {
+				updates[cnExtraKey(PlatformOpenCode, cnExtraSuffix5hUsed)] = snapshot.OpenCode.FiveHourPercent
+				updates[cnExtraKey(PlatformOpenCode, cnExtraSuffixWeeklyUsed)] = snapshot.OpenCode.WeeklyPercent
+				if snapshot.OpenCode.FiveHourResetAt != "" {
+					updates[cnExtraKey(PlatformOpenCode, cnExtraSuffix5hReset)] = snapshot.OpenCode.FiveHourResetAt
+				}
+				if snapshot.OpenCode.WeeklyResetAt != "" {
+					updates[cnExtraKey(PlatformOpenCode, cnExtraSuffixWeeklyReset)] = snapshot.OpenCode.WeeklyResetAt
+				}
+			}
 		} else {
 			if snapshot.Limit > 0 {
 				updates["quota_limit"] = snapshot.Limit
@@ -890,6 +935,7 @@ type parsedUpstreamQuotaUsage struct {
 	balance    *float64
 	zhipu      *parsedZhipuQuota
 	volcengine *parsedVolcengineQuota
+	opencode   *parsedOpenCodeZenGoQuota
 }
 
 // parsedVolcengineQuota 是火山方舟配额响应的解析结果（多窗口绝对额度/百分比）。
@@ -905,6 +951,16 @@ type parsedVolcengineQuota struct {
 	WeeklyResetAt   string
 	MonthlyQuota    float64
 	MonthlyUsed     float64
+	MonthlyPercent  float64
+	MonthlyResetAt  string
+}
+
+// parsedOpenCodeZenGoQuota 是 OpenCode Zen Go 配额响应的解析结果（三窗口已用百分比）。
+type parsedOpenCodeZenGoQuota struct {
+	FiveHourPercent float64
+	FiveHourResetAt string
+	WeeklyPercent   float64
+	WeeklyResetAt   string
 	MonthlyPercent  float64
 	MonthlyResetAt  string
 }
@@ -974,6 +1030,13 @@ func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, err
 //
 // quota_limited 模式：直接透传 limit/used。
 func computeQuotaFromUsage(parsed parsedUpstreamQuotaUsage, storedLimit float64) (limit, used, remaining float64, mode string) {
+	if parsed.opencode != nil {
+		mode = UpstreamQuotaSyncModeOpenCode
+		// OpenCode Zen Go 配额为三窗口百分比（无绝对额度），顶层不聚合 quota_limit/quota_used。
+		// 窗口数据由 snapshot.OpenCode 承载；此处 limit/used/remaining 保持 0，
+		// persistSnapshot 的 opencode 分支会写 opencode_* 快照键。
+		return 0, 0, 0, mode
+	}
 	if parsed.volcengine != nil {
 		mode = UpstreamQuotaSyncModeVolcengine
 		// 火山方舟配额为多窗口绝对额度/百分比，顶层不聚合 quota_limit/quota_used。

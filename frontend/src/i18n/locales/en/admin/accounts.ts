@@ -407,6 +407,7 @@ export default {
       quotaSyncVolcengineAccessKeyIdPlaceholder: 'AKLT…',
       quotaSyncVolcengineSecretAccessKey: 'Secret Access Key',
       quotaSyncVolcengineSecretAccessKeyPlaceholder: 'Leave empty to keep the saved secret',
+      quotaSyncOpenCodeHint: 'OpenCode Zen Go subscription upstream detected: quota is queried by reusing the inference API key directly (GET /zen/go/v1/usage), no extra credentials needed; syncs the 5-hour / weekly / monthly used percentages.',
       quotaDailyLimit: 'Daily Limit',
       quotaDailyLimitHint: 'Automatically resets every 24 hours from first usage.',
       quotaWeeklyLimit: 'Weekly Limit',

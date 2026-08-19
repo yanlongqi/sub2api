@@ -91,6 +91,14 @@ const isVolcengineUpstream = computed(() => {
 const showVolcengineCredentials = computed(() =>
   isVolcengineUpstream.value && localSyncFromUpstream.value
 )
+// OpenCode Zen Go 订阅：配额查询复用推理 api_key（无额外凭据），仅展示提示。
+const isOpenCodeZenGoUpstream = computed(() => {
+  const u = (props.baseUrl || '').toLowerCase()
+  return u.includes('opencode.ai/zen/go')
+})
+const showOpenCodeHint = computed(() =>
+  isOpenCodeZenGoUpstream.value && localSyncFromUpstream.value
+)
 const localVolcengineAccessKeyId = ref(props.volcengineAccessKeyId || '')
 const localVolcengineSecretAccessKey = ref(props.volcengineSecretAccessKey || '')
 
@@ -325,6 +333,11 @@ const dailyFixedHint = computed(() =>
         <!-- 同步上游模式提示：手动维度被隐藏时显示同步说明 -->
         <p v-if="localSyncFromUpstream" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           {{ t('admin.accounts.quotaSyncUpstreamActiveHint') }}
+        </p>
+
+        <!-- OpenCode Zen Go 订阅：复用推理 API Key，无需额外凭据，仅提示 -->
+        <p v-if="showOpenCodeHint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.quotaSyncOpenCodeHint') }}
         </p>
 
         <!-- 火山方舟 AK/SK：控制面 OpenAPI 配额查询凭据（仅 ark.*.volces.com 上游且同步开启时展示） -->

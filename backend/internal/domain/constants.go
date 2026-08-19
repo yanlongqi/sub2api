@@ -28,6 +28,7 @@ const (
 	PlatformZhipu     = "zhipu"    // 智谱 GLM (bigmodel)
 	PlatformDeepseek  = "deepseek" // DeepSeek
 	PlatformVolcengine = "volcengine" // 火山方舟 Ark（仅用于配额快照键，非独立接入平台）
+	PlatformOpenCode  = "opencode"  // OpenCode Zen Go 订阅（仅用于配额快照键，非独立接入平台）
 	PlatformComposite = "composite"
 )
 

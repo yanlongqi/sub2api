@@ -1601,6 +1601,11 @@ function getAccountPlanType(row: any): string | undefined {
   if (zhipuPlanType) {
     return zhipuPlanType.charAt(0).toUpperCase() + zhipuPlanType.slice(1)
   }
+  // OpenCode Zen Go 订阅配额同步快照：订阅类型固定为 Go（无多档位），
+  // 经 PlatformTypeBadge 第二行套餐徽章展示。
+  if (row.upstream_quota_sync?.opencode) {
+    return 'Go'
+  }
   return firstNonBlankString(row.credentials?.plan_type, row.parent_plan_type)
 }
 

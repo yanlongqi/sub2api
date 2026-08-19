@@ -1062,7 +1062,7 @@ export interface UpstreamBillingProbeResult {
 // ==================== Upstream Quota Sync ====================
 
 export type UpstreamQuotaSyncStatus = 'ok' | 'unsupported' | 'failed'
-export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | 'zhipu' | 'volcengine' | ''
+export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | 'zhipu' | 'volcengine' | 'opencode' | ''
 
 export interface UpstreamQuotaSyncZhipuQuota {
   level?: string
@@ -1092,6 +1092,17 @@ export interface UpstreamQuotaSyncVolcengineQuota {
   monthly_reset_at?: string
 }
 
+// OpenCode Zen Go 订阅多窗口配额快照：rolling/weekly/monthly 三窗口仅回已用百分比；
+// reset_at 为 RFC3339。订阅类型固定为 Go（无多档位）。
+export interface UpstreamQuotaSyncOpenCodeQuota {
+  five_hour_percent?: number
+  five_hour_reset_at?: string
+  weekly_percent?: number
+  weekly_reset_at?: string
+  monthly_percent?: number
+  monthly_reset_at?: string
+}
+
 export interface UpstreamQuotaSyncWindow {
   limit: number
   used: number
@@ -1117,6 +1128,7 @@ export interface UpstreamQuotaSyncSnapshot {
   subscription?: UpstreamQuotaSyncSubscription
   zhipu?: UpstreamQuotaSyncZhipuQuota
   volcengine?: UpstreamQuotaSyncVolcengineQuota
+  opencode?: UpstreamQuotaSyncOpenCodeQuota
   balance?: number
   currency?: string
   received_at?: string
