@@ -1730,6 +1730,7 @@ const makeQuotaBar = (
 
 const hasApiKeyQuota = computed(() => {
   if (props.account.type !== 'apikey' && props.account.type !== 'bedrock') return false
+  if (isCNNativePlatform.value) return false
   return (
     (props.account.quota_daily_limit ?? 0) > 0 ||
     (props.account.quota_weekly_limit ?? 0) > 0 ||
@@ -1738,31 +1739,46 @@ const hasApiKeyQuota = computed(() => {
   )
 })
 
+// CN 原生平台账号（zhipu/deepseek）：不走本地配额控制与 fork 同步通道，
+// 配额/余额由原生通道（内部探测快照 / 余额查询）展示。
+const isCNNativePlatform = computed(() =>
+  props.account.platform === 'zhipu' || props.account.platform === 'deepseek'
+)
+
 // 仅当 apikey/bedrock 账号启用了“同步上游配额”时显示手动刷新按钮。
-const showUpstreamQuotaSyncRefresh = computed(() =>
-  (props.account.type === 'apikey' || props.account.type === 'bedrock') &&
-  props.account.extra?.upstream_quota_sync_enabled === true
+// CN 原生平台（zhipu/deepseek）账号除外：配额/余额由原生通道展示与刷新
+//（智谱内部探测快照 / DeepSeek 余额查询按钮），fork 同步通道已移除，
+// 存量账号残留的 upstream_quota_sync_enabled 不再触发此按钮。
+const showUpstreamQuotaSyncRefresh = computed(
+  () =>
+    (props.account.type === 'apikey' || props.account.type === 'bedrock') &&
+    !isCNNativePlatform.value &&
+    props.account.extra?.upstream_quota_sync_enabled === true
 )
 
 const quotaDailyBar = computed((): QuotaBarInfo | null => {
+  if (isCNNativePlatform.value) return null
   const limit = props.account.quota_daily_limit ?? 0
   if (limit <= 0) return null
   return makeQuotaBar(props.account.quota_daily_used ?? 0, limit, 'quota_daily_start')
 })
 
 const quotaWeeklyBar = computed((): QuotaBarInfo | null => {
+  if (isCNNativePlatform.value) return null
   const limit = props.account.quota_weekly_limit ?? 0
   if (limit <= 0) return null
   return makeQuotaBar(props.account.quota_weekly_used ?? 0, limit, 'quota_weekly_start')
 })
 
 const quotaMonthlyBar = computed((): QuotaBarInfo | null => {
+  if (isCNNativePlatform.value) return null
   const limit = props.account.quota_monthly_limit ?? 0
   if (limit <= 0) return null
   return makeQuotaBar(props.account.quota_monthly_used ?? 0, limit, 'quota_monthly_start')
 })
 
 const quotaTotalBar = computed((): QuotaBarInfo | null => {
+  if (isCNNativePlatform.value) return null
   const limit = props.account.quota_limit ?? 0
   if (limit <= 0) return null
   return makeQuotaBar(props.account.quota_used ?? 0, limit)
