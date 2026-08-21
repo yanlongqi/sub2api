@@ -1355,14 +1355,16 @@ func (a *Account) GetAccountMode() string {
 }
 
 // IsCodingPlan 报告账号是否为 Coding Plan 模式（用于滚动用量窗口冷却）。
+// DeepSeek 无 coding plan 概念（仅按量付费），即使存量凭证误存
+// account_mode=coding 也视为 payg。
 func (a *Account) IsCodingPlan() bool {
-	return a.GetAccountMode() == AccountModeCoding
+	return a.Platform != PlatformDeepseek && a.GetAccountMode() == AccountModeCoding
 }
 
 // GetAPIProtocol 返回国产供应商账号的上游 API 协议。存储于
 // credentials["api_protocol"]；缺失或与平台不匹配时回退 chat_completions
-// （与既有行为完全一致）。responses 协议仅 deepseek 支持（官方原生 /responses
-// 端点，适配 Codex）；kimi/zhipu 无此端点。
+// （与既有行为完全一致）。responses 协议由 deepseek 与智谱支持（官方原生
+// /responses 端点，适配 Codex；智谱 payg/coding 均可用）；kimi 无此端点。
 func (a *Account) GetAPIProtocol() string {
 	if a == nil || !a.IsCNProvider() {
 		return APIProtocolChatCompletions
@@ -1373,7 +1375,7 @@ func (a *Account) GetAPIProtocol() string {
 	case APIProtocolAnthropic:
 		return APIProtocolAnthropic
 	case APIProtocolResponses:
-		if a.Platform == PlatformDeepseek {
+		if a.Platform == PlatformDeepseek || a.Platform == PlatformZhipu {
 			return APIProtocolResponses
 		}
 	case APIProtocolChatCompletions:
@@ -1423,7 +1425,7 @@ func (a *Account) defaultCNProtocolBaseURL(protocol string) string {
 		case PlatformDeepseek:
 			return DefaultDeepseekAnthropicBaseURL
 		}
-	case APIProtocolChatCompletions, APIProtocolResponses:
+	case APIProtocolChatCompletions:
 		switch a.Platform {
 		case PlatformKimi:
 			if a.GetAccountMode() == AccountModeCoding {
@@ -1437,6 +1439,20 @@ func (a *Account) defaultCNProtocolBaseURL(protocol string) string {
 			return DefaultZhipuPayGBaseURL
 		case PlatformDeepseek:
 			return DefaultDeepseekBaseURL
+		}
+	case APIProtocolResponses:
+		// 智谱 responses 独立端点（/api/v1，payg/coding 均可用）；deepseek 与
+		// chat_completions 同域；kimi 无原生端点，回退 CC 默认保持地址兼容。
+		switch a.Platform {
+		case PlatformZhipu:
+			return DefaultZhipuResponsesBaseURL
+		case PlatformDeepseek:
+			return DefaultDeepseekBaseURL
+		case PlatformKimi:
+			if a.GetAccountMode() == AccountModeCoding {
+				return DefaultKimiCodingBaseURL
+			}
+			return DefaultKimiPayGBaseURL
 		}
 	}
 	return ""

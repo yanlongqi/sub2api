@@ -35,7 +35,10 @@ const (
 	cnExtraSuffix5hReset      = "5h_reset_at"
 	cnExtraSuffixWeeklyUsed   = "weekly_used_percent"
 	cnExtraSuffixWeeklyReset  = "weekly_reset_at"
+	cnExtraSuffixMcpUsed      = "mcp_used_percent" // 智谱 TIME_LIMIT（如 MCP 工具周期额度）
+	cnExtraSuffixMcpReset     = "mcp_reset_at"
 	cnExtraSuffixUsageUpdated = "usage_updated_at"
+	cnExtraSuffixPlanLevel   = "plan_level" // 智谱套餐等级（data.level）
 )
 
 // cnExtraKey 拼接 provider 维度的 extra 键。
@@ -226,6 +229,9 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	result.CredentialValid = true
 
 	updates := cnQuotaExtraUpdates(provider, tiers, now)
+	if provider == PlatformZhipu && result.PlanLevel != "" {
+		updates[cnExtraKey(provider, cnExtraSuffixPlanLevel)] = result.PlanLevel
+	}
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("cn_quota_persist_failed", "account_id", account.ID, "provider", provider, "error", err)
 	} else {
@@ -491,7 +497,42 @@ func parseZhipuTokenTiers(data gjson.Result) []CNQuotaTier {
 	if weeklySet {
 		tiers = append(tiers, CNQuotaTier{Window: "weekly", UsedPercent: weekly.percentage, ResetAt: weekly.resetISO})
 	}
+	// TIME_LIMIT：阅周期额度（如 MCP 工具额度），独立于 5h/weekly 窗口展示。
+	if mcpPercent, mcpReset, ok := parseZhipuTimeLimit(data); ok {
+		tiers = append(tiers, CNQuotaTier{Window: "mcp", UsedPercent: mcpPercent, ResetAt: mcpReset})
+	}
 	return tiers
+}
+
+// parseZhipuTimeLimit 解析智谱额度响应 data.limits 中的 TIME_LIMIT 条目
+//（阅周期额度，如 MCP 工具额度）。返回已用百分比与周期重置时间；
+// 无该条目或 percentage 字段缺失时 ok=false。
+func parseZhipuTimeLimit(data gjson.Result) (percent float64, resetAt string, ok bool) {
+	var found gjson.Result
+	data.Get("limits").ForEach(func(_, item gjson.Result) bool {
+		if strings.ToUpper(strings.TrimSpace(item.Get("type").String())) == "TIME_LIMIT" {
+			found = item
+			return false // 取首条 TIME_LIMIT
+		}
+		return true
+	})
+	if !found.Exists() {
+		return 0, "", false
+	}
+	p, valid := cnParseF64(found.Get("percentage").Value())
+	if !valid {
+		return 0, "", false
+	}
+	resetISO := ""
+	if nr := found.Get("nextResetTime"); nr.Exists() {
+		switch nr.Type {
+		case gjson.Number:
+			resetISO = cnMillisToRFC3339(nr.Int())
+		case gjson.String:
+			resetISO = cnNormalizeResetTime(nr.String())
+		}
+	}
+	return p, resetISO, true
 }
 
 // cnQuotaExtraUpdates 根据 tier 列表构造 provider 维度的 Extra 快照更新。
@@ -510,6 +551,11 @@ func cnQuotaExtraUpdates(provider string, tiers []CNQuotaTier, now time.Time) ma
 			updates[cnExtraKey(provider, cnExtraSuffixWeeklyUsed)] = t.UsedPercent
 			if t.ResetAt != "" {
 				updates[cnExtraKey(provider, cnExtraSuffixWeeklyReset)] = t.ResetAt
+			}
+		case "mcp":
+			updates[cnExtraKey(provider, cnExtraSuffixMcpUsed)] = t.UsedPercent
+			if t.ResetAt != "" {
+				updates[cnExtraKey(provider, cnExtraSuffixMcpReset)] = t.ResetAt
 			}
 		}
 	}

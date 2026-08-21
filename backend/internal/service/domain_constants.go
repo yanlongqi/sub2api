@@ -76,7 +76,9 @@ const (
 	DefaultKimiCodingBaseURL  = "https://api.kimi.com/coding/v1"
 	DefaultZhipuPayGBaseURL   = "https://open.bigmodel.cn/api/paas/v4"
 	DefaultZhipuCodingBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
-	DefaultDeepseekBaseURL    = "https://api.deepseek.com"
+	// 智谱原生 Responses 端点（/api/v1/responses，适配 Codex；payg/coding 均可用）。
+	DefaultZhipuResponsesBaseURL = "https://open.bigmodel.cn/api/v1"
+	DefaultDeepseekBaseURL             = "https://api.deepseek.com"
 )
 
 // 国产供应商 Anthropic 协议端点的默认 base_url（上游路径为 {base}/v1/messages）。

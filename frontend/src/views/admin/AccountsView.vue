@@ -1593,13 +1593,15 @@ function getAccountPlanType(row: any): string | undefined {
   if (volcPlanType) {
     return volcPlanType.charAt(0).toUpperCase() + volcPlanType.slice(1)
   }
-  // 智谱 Coding Plan 配额同步快照：data.level（如 lite/pro/max），
-  // 同样首字母大写后经 PlatformTypeBadge 第二行套餐徽章展示。
-  const zhipuPlanType = typeof row.upstream_quota_sync?.zhipu?.level === 'string'
-    ? row.upstream_quota_sync.zhipu.level.trim()
-    : ''
-  if (zhipuPlanType) {
-    return zhipuPlanType.charAt(0).toUpperCase() + zhipuPlanType.slice(1)
+  // 智谱原生平台 Coding Plan 账号：内部周期探测落库的 extra.zhipu_plan_level
+  // （探测响应 data.level），首字母大写后经 PlatformTypeBadge 第二行套餐徽章展示。
+  if (row.platform === 'zhipu') {
+    const zhipuNativeLevel = typeof (row.extra as Record<string, unknown> | undefined)?.zhipu_plan_level === 'string'
+      ? ((row.extra as Record<string, unknown>).zhipu_plan_level as string).trim()
+      : ''
+    if (zhipuNativeLevel) {
+      return zhipuNativeLevel.charAt(0).toUpperCase() + zhipuNativeLevel.slice(1)
+    }
   }
   // OpenCode Zen Go 订阅配额同步快照：订阅类型固定为 Go（无多档位），
   // 经 PlatformTypeBadge 第二行套餐徽章展示。

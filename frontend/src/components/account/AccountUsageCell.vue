@@ -429,40 +429,18 @@
       </div>
     </template>
 
-    <!-- CN providers (Kimi / Zhipu / DeepSeek): coding-plan quota or payg balance -->
-    <template v-else-if="account.platform === 'kimi' || account.platform === 'zhipu' || account.platform === 'deepseek'">
+    <!-- Kimi: coding-plan quota or payg balance（CN 探测单元格）。 -->
+    <!-- （智谱/DeepSeek 走下方 apikey 分支：内部探测快照 / 余额行+查询按钮） -->
+    <template v-else-if="account.platform === 'kimi'">
       <div class="space-y-1">
-        <!-- 子单元格各自按 模式×平台 判定可见；两者都不可见时（智谱 payg 无公开
-             余额端点、coding 探测也不适用）才回落到占位符。 -->
+        <!-- 子单元格各自按 模式×平台 判定可见；两者都不可见时才回落到占位符。 -->
         <div
-          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible && !upstreamZhipuQuota"
+          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible"
           class="text-xs text-gray-400"
           :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
         >-</div>
-        <CNProviderQuotaCell v-if="!upstreamZhipuQuota" :account="account" />
-        <CNProviderBalanceCell v-if="!upstreamZhipuQuota" :account="account" />
-        <template v-if="upstreamZhipuQuota">
-          <UsageProgressBar
-            label="5h"
-            :utilization="upstreamZhipuFiveHourPercent ?? 0"
-            :resets-at="upstreamZhipuQuota?.five_hour_reset_at || null"
-            color="indigo"
-          />
-          <UsageProgressBar
-            v-if="upstreamZhipuWeeklyPercent != null"
-            label="7d"
-            :utilization="upstreamZhipuWeeklyPercent"
-            :resets-at="upstreamZhipuQuota?.weekly_reset_at || null"
-            color="emerald"
-          />
-          <UsageProgressBar
-            v-if="upstreamZhipuPeriodPercent != null"
-            label="MCP"
-            :utilization="upstreamZhipuPeriodPercent"
-            :resets-at="upstreamZhipuQuota?.period_reset_at || null"
-            color="amber"
-          />
-        </template>
+        <CNProviderQuotaCell :account="account" />
+        <CNProviderBalanceCell :account="account" />
       </div>
     </template>
 
@@ -627,6 +605,52 @@
         <div class="h-3 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
       </div>
 
+      <!-- DeepSeek（仅按量付费）：余额行 + 手动查询按钮（蓝色，与其他查询按钮一致）。
+           余额优先用探测结果，其次落库快照（deepseek_balance(s)，CN 周期任务写）。 -->
+      <template v-if="isDeepseekPayg">
+        <div
+          v-if="deepseekBalanceEntries.length"
+          class="flex flex-wrap items-center gap-1 text-[10px]"
+        >
+          <span
+            v-for="(entry, i) in deepseekBalanceEntries"
+            :key="i"
+            class="rounded bg-emerald-50 px-1 py-0.5 font-medium leading-none text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+          >
+            {{ entry.currency ? entry.currency + ' ' : '' }}{{ entry.balance >= 100 ? entry.balance.toFixed(0) : entry.balance.toFixed(2) }}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          :disabled="deepseekProbing"
+          @click="probeDeepseekBalance"
+        >
+          <svg
+            class="h-2.5 w-2.5"
+            :class="{ 'animate-spin': deepseekProbing }"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {{ t('admin.accounts.usageWindow.activeQuery') }}
+        </button>
+        <div
+          v-if="deepseekProbeError"
+          class="truncate text-[10px] leading-4 text-red-600 dark:text-red-400"
+          :title="deepseekProbeError"
+        >
+          {{ deepseekProbeError.length > 80 ? deepseekProbeError.slice(0, 80) + '...' : deepseekProbeError }}
+        </div>
+      </template>
+
       <!-- API Key accounts with quota limits: show progress bars -->
       <template v-if="upstreamVolcengineQuota">
         <UsageProgressBar
@@ -650,27 +674,63 @@
           color="amber"
         />
       </template>
-      <template v-if="upstreamZhipuQuota">
-        <UsageProgressBar
-          label="5h"
-          :utilization="upstreamZhipuFiveHourPercent ?? 0"
-          :resets-at="upstreamZhipuQuota?.five_hour_reset_at || null"
-          color="indigo"
-        />
-        <UsageProgressBar
-          v-if="upstreamZhipuWeeklyPercent != null"
-          label="7d"
-          :utilization="upstreamZhipuWeeklyPercent"
-          :resets-at="upstreamZhipuQuota?.weekly_reset_at || null"
-          color="emerald"
-        />
-        <UsageProgressBar
-          v-if="upstreamZhipuPeriodPercent != null"
-          label="MCP"
-          :utilization="upstreamZhipuPeriodPercent"
-          :resets-at="upstreamZhipuQuota?.period_reset_at || null"
-          color="amber"
-        />
+      <!-- 智谱 Coding Plan（原生平台账号）：内部周期探测快照（extra.zhipu_*，
+           CN 周期任务自动刷新）渲染进度条，无需开启同步上游。套餐等级徽章
+           经 PlatformTypeBadge 第二行展示（AccountsView.getAccountPlanType）。 -->
+      <template v-if="isCnZhipuCodingPlan">
+        <template v-if="cnZhipuInternalQuota">
+          <UsageProgressBar
+            label="5h"
+            :utilization="cnZhipuInternalQuota.fiveHourPercent"
+            :resets-at="cnZhipuInternalQuota.fiveHourResetAt"
+            color="indigo"
+          />
+          <UsageProgressBar
+            v-if="cnZhipuInternalQuota.weeklyPercent != null"
+            label="7d"
+            :utilization="cnZhipuInternalQuota.weeklyPercent"
+            :resets-at="cnZhipuInternalQuota.weeklyResetAt"
+            color="emerald"
+          />
+          <!-- MCP：阅周期额度（TIME_LIMIT，如 MCP 工具额度），仅部分套餐返回 -->
+          <UsageProgressBar
+            v-if="cnZhipuInternalQuota.mcpPercent != null"
+            label="MCP"
+            :utilization="cnZhipuInternalQuota.mcpPercent"
+            :resets-at="cnZhipuInternalQuota.mcpResetAt"
+            color="amber"
+          />
+        </template>
+        <!-- 手动探测：与 CNProviderQuotaCell 同款按钮，成功后经 account-updated 通道回传最新快照 -->
+        <button
+          type="button"
+          class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          :disabled="cnZhipuProbing"
+          @click="probeCnZhipuQuota"
+        >
+          <svg
+            class="h-2.5 w-2.5"
+            :class="{ 'animate-spin': cnZhipuProbing }"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {{ t('admin.accounts.usageWindow.activeQuery') }}
+        </button>
+        <div
+          v-if="cnZhipuProbeError"
+          class="truncate text-[10px] leading-4 text-red-600 dark:text-red-400"
+          :title="cnZhipuProbeError"
+        >
+          {{ cnZhipuProbeError.length > 80 ? cnZhipuProbeError.slice(0, 80) + '...' : cnZhipuProbeError }}
+        </div>
       </template>
       <template v-if="upstreamOpenCodeQuota">
         <UsageProgressBar
@@ -764,7 +824,7 @@
 
       <!-- No data at all -->
       <div
-        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !upstreamZhipuQuota && !account.ollama_cloud_usage?.eligible"
+        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !cnZhipuInternalQuota && !deepseekBalanceEntries.length && !account.ollama_cloud_usage?.eligible"
         class="text-xs text-gray-400"
       >-</div>
     </div>
@@ -851,13 +911,11 @@ let visibilityObserver: IntersectionObserver | null = null
 const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
-  // CN providers: apikey 账号也有滚动用量窗口（coding plan）或余额（payg），
+  // Kimi：apikey 账号也有滚动用量窗口（coding plan）或余额（payg），
   // 由 CNProviderQuotaCell / CNProviderBalanceCell 自行探测与展示。
-  if (
-    props.account.platform === 'kimi' ||
-    props.account.platform === 'zhipu' ||
-    props.account.platform === 'deepseek'
-  ) {
+  // 智谱/DeepSeek 不走 CN 探测单元格——落回下方 apikey 分支
+  //（智谱：内部周期探测快照进度条；DeepSeek：余额行 + 查询按钮）。
+  if (props.account.platform === 'kimi') {
     return true
   }
   return props.account.type === 'oauth' || props.account.type === 'setup-token'
@@ -1723,20 +1781,170 @@ const upstreamBalanceDisplay = computed(() => {
 
 // 智谱模式：从快照的 zhipu 字段读取 5h/weekly 双窗口已用百分比。
 // 优先使用 DTO 顶层字段（后端 redact 了 extra 中的快照），兼容旧版 extra 内嵌。
-const upstreamZhipuQuota = computed(() => {
-  const snapshot = props.account.upstream_quota_sync ?? props.account.extra?.upstream_quota_sync
-  if (!snapshot || snapshot.mode !== 'zhipu' || !snapshot.zhipu) return null
-  return snapshot.zhipu
+// 智谱 Coding Plan 原生平台账号：读内部周期探测落库的 extra 快照
+// （zhipu_5h_used_percent 等，CN 周期任务自动刷新）。
+const isCnZhipuCodingPlan = computed(
+  () =>
+    props.account.platform === 'zhipu' &&
+    props.account.type === 'apikey' &&
+    props.account.credentials?.account_mode === 'coding'
+)
+const cnZhipuInternalQuota = computed<{
+  fiveHourPercent: number
+  fiveHourResetAt: string | null
+  weeklyPercent: number | null
+  weeklyResetAt: string | null
+  mcpPercent: number | null
+  mcpResetAt: string | null
+} | null>(() => {
+  if (!isCnZhipuCodingPlan.value) return null
+  const extra = props.account.extra as Record<string, unknown> | undefined
+  const pct = (key: string): number | null => {
+    const v = extra?.[key]
+    return typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : null
+  }
+  const resetAt = (key: string): string | null => {
+    const v = extra?.[key]
+    return typeof v === 'string' && v ? v : null
+  }
+  const fiveHour = pct('zhipu_5h_used_percent')
+  const weekly = pct('zhipu_weekly_used_percent')
+  const mcp = pct('zhipu_mcp_used_percent')
+  if (fiveHour == null && weekly == null && mcp == null) return null
+  return {
+    fiveHourPercent: fiveHour ?? 0,
+    fiveHourResetAt: resetAt('zhipu_5h_reset_at'),
+    weeklyPercent: weekly,
+    weeklyResetAt: resetAt('zhipu_weekly_reset_at'),
+    mcpPercent: mcp,
+    mcpResetAt: resetAt('zhipu_mcp_reset_at')
+  }
 })
 
-const upstreamZhipuPercent = (value: number | undefined | null): number | null => {
-  if (value == null || !Number.isFinite(value)) return null
-  return Math.min(100, Math.max(0, value))
+// 手动/自动探测：复用 CNProviderQuotaCell 的探测端点，成功后经 account-updated
+// 回传最新账号（extra 含新鲜快照与 plan_level）。
+const cnZhipuProbing = ref(false)
+const cnZhipuProbeError = ref<string | null>(null)
+const probeCnZhipuQuota = async () => {
+  if (cnZhipuProbing.value) return
+  cnZhipuProbing.value = true
+  cnZhipuProbeError.value = null
+  try {
+    const result = await adminAPI.cnProviders.queryQuota(props.account.id)
+    if (result.success) {
+      const updated = JSON.parse(JSON.stringify(props.account)) as Account
+      updated.extra = { ...(updated.extra || {}), ...buildCnZhipuSnapshotFromProbe(result) }
+      emit('account-updated', updated)
+    } else {
+      cnZhipuProbeError.value = result.error || t('common.error')
+    }
+  } catch (e: any) {
+    cnZhipuProbeError.value = e?.message || e?.reason || t('common.error')
+  } finally {
+    cnZhipuProbing.value = false
+  }
 }
 
-const upstreamZhipuFiveHourPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.five_hour_percent))
-const upstreamZhipuWeeklyPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.weekly_percent))
-const upstreamZhipuPeriodPercent = computed(() => upstreamZhipuPercent(upstreamZhipuQuota.value?.period_percent))
+// 探测结果 → extra 快照键（与后端 cnQuotaExtraUpdates 对齐）。
+const buildCnZhipuSnapshotFromProbe = (result: {
+  tiers?: Array<{ window: string; used_percent: number; reset_at?: string }>
+  plan_level?: string
+}): Record<string, unknown> => {
+  const extra: Record<string, unknown> = {
+    zhipu_usage_updated_at: new Date().toISOString()
+  }
+  if (result.plan_level) extra.zhipu_plan_level = result.plan_level
+  for (const tier of result.tiers ?? []) {
+    if (tier.window === '5h') {
+      extra.zhipu_5h_used_percent = tier.used_percent
+      if (tier.reset_at) extra.zhipu_5h_reset_at = tier.reset_at
+    } else if (tier.window === 'weekly') {
+      extra.zhipu_weekly_used_percent = tier.used_percent
+      if (tier.reset_at) extra.zhipu_weekly_reset_at = tier.reset_at
+    } else if (tier.window === 'mcp') {
+      extra.zhipu_mcp_used_percent = tier.used_percent
+      if (tier.reset_at) extra.zhipu_mcp_reset_at = tier.reset_at
+    }
+  }
+  return extra
+}
+
+// 挂载时快照缺失或过期（>15 分钟）自动探测一次；模块级去防防止翻页/筛选
+// 重复挂载时对同一账号探测风暴（与 CNProviderQuotaCell 同款策略）。
+const CN_ZHIPU_SNAPSHOT_STALE_MS = 15 * 60 * 1000
+const CN_ZHIPU_AUTO_PROBE_DEBOUNCE_MS = 5 * 60 * 1000
+const lastCnZhipuAutoProbeAt = new Map<number, number>()
+const cnZhipuSnapshotIsStale = computed(() => {
+  if (!isCnZhipuCodingPlan.value) return false
+  const v = (props.account.extra as Record<string, unknown> | undefined)?.zhipu_usage_updated_at
+  if (typeof v !== 'string' || !v) return true
+  const ts = new Date(v).getTime()
+  return Number.isNaN(ts) || Date.now() - ts > CN_ZHIPU_SNAPSHOT_STALE_MS
+})
+watch(
+  [isCnZhipuCodingPlan, hasEnteredViewport],
+  ([eligible, entered]) => {
+    if (!eligible || !entered) return
+    if (!cnZhipuSnapshotIsStale.value) return
+    const last = lastCnZhipuAutoProbeAt.get(props.account.id) ?? 0
+    if (Date.now() - last < CN_ZHIPU_AUTO_PROBE_DEBOUNCE_MS) return
+    lastCnZhipuAutoProbeAt.set(props.account.id, Date.now())
+    probeCnZhipuQuota()
+  },
+  { immediate: true }
+)
+
+// DeepSeek（仅按量付费）：余额行 + 手动查询按钮。复用 CNProviderBalanceCell
+// 的探测端点；余额优先探测结果，其次落库快照（deepseek_balance(s)）。
+const isDeepseekPayg = computed(
+  () =>
+    props.account.platform === 'deepseek' &&
+    props.account.type === 'apikey' &&
+    props.account.credentials?.account_mode !== 'coding'
+)
+const deepseekProbing = ref(false)
+const deepseekProbeError = ref<string | null>(null)
+const deepseekProbeResult = ref<{ currency: string; balance: number }[] | null>(null)
+const deepseekBalanceEntries = computed(() => {
+  if (deepseekProbeResult.value && deepseekProbeResult.value.length) return deepseekProbeResult.value
+  const extra = props.account.extra as Record<string, unknown> | undefined
+  const balances = extra?.deepseek_balances
+  if (Array.isArray(balances)) {
+    const entries = balances.flatMap((item): { currency: string; balance: number }[] => {
+      if (!item || typeof item !== 'object') return []
+      const { currency, balance } = item as Record<string, unknown>
+      if (typeof currency !== 'string' || typeof balance !== 'number') return []
+      return [{ currency, balance }]
+    })
+    if (entries.length) return entries
+  }
+  const bal = extra?.deepseek_balance
+  if (typeof bal === 'number' && Number.isFinite(bal)) {
+    const cur = typeof extra?.deepseek_balance_currency === 'string' ? extra.deepseek_balance_currency : 'CNY'
+    return [{ currency: cur, balance: bal }]
+  }
+  return []
+})
+const probeDeepseekBalance = async () => {
+  if (deepseekProbing.value) return
+  deepseekProbing.value = true
+  deepseekProbeError.value = null
+  try {
+    const result = await adminAPI.cnProviders.queryBalance(props.account.id)
+    if (result.success) {
+      deepseekProbeResult.value =
+        result.balances && result.balances.length
+          ? result.balances.map((b) => ({ currency: b.currency, balance: b.balance }))
+          : [{ currency: result.currency || 'CNY', balance: result.balance }]
+    } else {
+      deepseekProbeError.value = result.error || t('common.error')
+    }
+  } catch (e: any) {
+    deepseekProbeError.value = e?.message || e?.reason || t('common.error')
+  } finally {
+    deepseekProbing.value = false
+  }
+}
 
 // 火山方舟模式：从快照的 volcengine 字段读取 5h/weekly/monthly 窗口。
 // Agent Plan 有绝对额度时优先算百分比（Used/Quota×100），Coding Plan 直接用百分比。

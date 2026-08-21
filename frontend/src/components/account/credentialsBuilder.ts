@@ -256,7 +256,7 @@ export const GROK_BASE_URL_PRESETS: GrokBaseUrlPreset[] = [
 
 export type CnAccountMode = 'payg' | 'coding'
 
-/** 仅 deepseek 支持原生 responses；adaptive 会按入站协议选择原生端点。 */
+/** deepseek 与智谱（payg/coding 均可）支持原生 responses；adaptive 会按入站协议选择原生端点。 */
 export type CnApiProtocol = 'adaptive' | 'chat_completions' | 'anthropic' | 'responses'
 export type CnNativeApiProtocol = Exclude<CnApiProtocol, 'adaptive'>
 
@@ -279,8 +279,10 @@ export const CN_BASE_URL_PRESETS: Record<'kimi' | 'zhipu' | 'deepseek', CnBaseUr
   zhipu: [
     { mode: 'payg', protocol: 'chat_completions', label: 'GLM PaaS', url: 'https://open.bigmodel.cn/api/paas/v4' },
     { mode: 'payg', protocol: 'anthropic', label: 'GLM Anthropic', url: 'https://open.bigmodel.cn/api/anthropic' },
+    { mode: 'payg', protocol: 'responses', label: 'GLM Responses', url: 'https://open.bigmodel.cn/api/v1' },
     { mode: 'coding', protocol: 'chat_completions', label: 'GLM Coding', url: 'https://open.bigmodel.cn/api/coding/paas/v4' },
-    { mode: 'coding', protocol: 'anthropic', label: 'GLM Coding Anthropic', url: 'https://open.bigmodel.cn/api/anthropic' }
+    { mode: 'coding', protocol: 'anthropic', label: 'GLM Coding Anthropic', url: 'https://open.bigmodel.cn/api/anthropic' },
+    { mode: 'coding', protocol: 'responses', label: 'GLM Coding Responses', url: 'https://open.bigmodel.cn/api/v1' }
   ],
   deepseek: [
     { mode: 'payg', protocol: 'chat_completions', label: 'DeepSeek', url: 'https://api.deepseek.com' },
@@ -307,11 +309,13 @@ export function defaultCNBaseUrl(
         return ''
     }
   }
-  // responses 仅 deepseek：base 与 chat_completions 相同（端点路径差异由后端处理）。
+  // responses 由 deepseek 与智谱（payg/coding 均可）支持：端点路径差异由后端处理
+  //（智谱 /api/v1 → /api/v1/responses；deepseek 与 chat_completions 同域）。
   switch (platform) {
     case 'kimi':
       return mode === 'coding' ? 'https://api.kimi.com/coding/v1' : 'https://api.moonshot.cn/v1'
     case 'zhipu':
+      if (protocol === 'responses') return 'https://open.bigmodel.cn/api/v1'
       return mode === 'coding'
         ? 'https://open.bigmodel.cn/api/coding/paas/v4'
         : 'https://open.bigmodel.cn/api/paas/v4'
@@ -330,20 +334,26 @@ export function defaultCNAdaptiveBaseUrls(
   return {
     chat_completions: defaultCNBaseUrl(platform, mode, 'chat_completions'),
     anthropic: defaultCNBaseUrl(platform, mode, 'anthropic'),
-    responses: platform === 'deepseek' ? defaultCNBaseUrl(platform, mode, 'responses') : ''
+    responses:
+      platform === 'deepseek' || platform === 'zhipu'
+        ? defaultCNBaseUrl(platform, mode, 'responses')
+        : ''
   }
 }
 
 // ===== 国产供应商用量单元格可见性（单一事实源） =====
 // CNProviderQuotaCell / CNProviderBalanceCell 与 AccountUsageCell 的占位符判定
 // 共用，避免多处复制条件后一处改另一处漏改。
+// 仅 kimi 使用 CN 配额探测单元格；余额单元格 kimi payg + deepseek payg
+//（智谱 payg 无公开余额端点）。deepseek 仅按量付费，无 coding。
 
 export function cnQuotaCellVisible(platform: string, accountMode: string): boolean {
-  return (platform === 'kimi' || platform === 'zhipu') && accountMode === 'coding'
+  return platform === 'kimi' && accountMode === 'coding'
 }
 
 export function cnBalanceCellVisible(platform: string, accountMode: string): boolean {
-  return (platform === 'kimi' || platform === 'deepseek') && accountMode !== 'coding'
+  if (platform === 'kimi') return accountMode !== 'coding'
+  return platform === 'deepseek' && accountMode !== 'coding'
 }
 
 /**

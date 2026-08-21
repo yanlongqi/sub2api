@@ -1552,29 +1552,47 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('CNY 12.5')
   })
 
-  it('智谱上游配额模式展示 5h 与每周双窗口百分比', async () => {
-    const wrapper = mount(AccountUsageCell, {
+  it('zhipu 不渲染 CN 探测单元格；deepseek payg 显示余额行与查询按钮', async () => {
+    // 智谱走内部周期探测快照（下方 apikey 分支），CN 单元格不挂载；
+    // DeepSeek 仅按量付费，apikey 分支内展示余额行 + 统一蓝色查询按钮。
+    const zhipuWrapper = mount(AccountUsageCell, {
       props: {
         account: makeAccount({
-          id: 5004,
+          id: 5005,
           platform: 'zhipu',
           type: 'apikey',
-          upstream_quota_sync: {
-            status: 'ok',
-            mode: 'zhipu',
-            zhipu: {
-              level: 'pro',
-              five_hour_percent: 26,
-              five_hour_reset_at: '2026-08-19T10:00:00Z',
-              weekly_percent: 5,
-              weekly_reset_at: '2026-08-24T00:00:00Z'
-            },
-            last_attempt_at: '2026-08-19T00:00:00Z',
-            next_sync_at: '2026-08-19T00:05:00Z'
-          },
+          credentials: { account_mode: 'coding' },
           extra: {}
         }),
         todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          AccountQuotaInfo: true,
+          CNProviderQuotaCell: { template: '<div data-test="cn-cell-marker" />' },
+          CNProviderBalanceCell: { template: '<div data-test="cn-cell-marker" />' }
+        }
+      }
+    })
+    await flushPromises()
+    expect(zhipuWrapper.find('[data-test="cn-cell-marker"]').exists()).toBe(false)
+
+    const deepseekWrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5006,
+          platform: 'deepseek',
+          type: 'apikey',
+          credentials: { account_mode: 'payg' },
+          extra: {
+            deepseek_balances: [
+              { currency: 'CNY', balance: 48.48 },
+              { currency: 'USD', balance: 3.2 }
+            ]
+          }
+        }),
+        todayStats: { requests: 12, tokens: 3400, cost: 0.05, user_cost: 0 } as any,
         todayStatsLoading: false
       },
       global: {
@@ -1585,12 +1603,73 @@ describe('AccountUsageCell', () => {
         }
       }
     })
-
     await flushPromises()
+    // 上：今日使用量行
+    expect(deepseekWrapper.text()).toContain('12 req')
+    // 中：余额行（多币种）
+    expect(deepseekWrapper.text()).toContain('CNY 48.48')
+    expect(deepseekWrapper.text()).toContain('USD 3.2')
+    // 下：查询按钮（与其他查询按钮同款，测试 locale 为英文）
+    expect(deepseekWrapper.text()).toContain('Query')
+  })
 
-    expect(wrapper.text()).toContain('5h')
-    expect(wrapper.text()).toContain('26%')
-    expect(wrapper.text()).toContain('7d')
-    expect(wrapper.text()).toContain('5%')
+  it('kimi coding 账号继续渲染 CN 探测单元格', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5007,
+          platform: 'kimi',
+          type: 'apikey',
+          credentials: { account_mode: 'coding' },
+          extra: {}
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          AccountQuotaInfo: true,
+          CNProviderQuotaCell: { template: '<div data-test="cn-cell-marker" />' },
+          CNProviderBalanceCell: true
+        }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="cn-cell-marker"]').exists()).toBe(true)
+  })
+
+  it('智谱 Coding Plan 用内部周期探测快照渲染双窗口进度条', async () => {
+    // coding plan 无需开启同步上游：CN 周期任务落的 extra.zhipu_* 快照
+    // 直接渲染 5h + 7d 进度条。
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 5008,
+          platform: 'zhipu',
+          type: 'apikey',
+          credentials: { account_mode: 'coding' },
+          extra: {
+            zhipu_5h_used_percent: 26,
+            zhipu_5h_reset_at: '2026-08-19T10:00:00Z',
+            zhipu_weekly_used_percent: 5,
+            zhipu_weekly_reset_at: '2026-08-24T00:00:00Z'
+          }
+        }),
+        todayStats: null,
+        todayStatsLoading: false
+      },
+      global: {
+        stubs: {
+          AccountQuotaInfo: true,
+          UsageProgressBar: {
+            props: ['label', 'utilization', 'color'],
+            template: '<div class="usage-bar">{{ label }}|{{ Math.round(utilization) }}%</div>'
+          }
+        }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('5h|26%')
+    expect(wrapper.text()).toContain('7d|5%')
   })
 })

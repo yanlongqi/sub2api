@@ -20,7 +20,7 @@ import (
 //
 // 不直接对接上游，而是把账号侧现成的用量服务归一成 domain.MonitorQuotaSnapshot：
 //   - 海外 5 家（anthropic/openai/gemini/antigravity/grok）→ AccountUsageService.GetUsageForAccount
-//   - 国产 coding plan（kimi/zhipu/deepseek）→ CNProviderQuotaService.QueryUsageForAccount
+//   - 国产 coding plan（kimi/zhipu；DeepSeek 无 coding plan）→ CNProviderQuotaService.QueryUsageForAccount
 //   - 国产 payg（kimi/deepseek）→ CNProviderBalanceService.QueryBalanceForAccount
 //     （zhipu payg 无公开余额端点，探测会返回该错误，原样透出）
 // 数据源统一接受已加载的 *Account：fetchUncached 路由前 GetByID 一次并传下去，

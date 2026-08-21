@@ -17,15 +17,16 @@ describe('defaultCNAdaptiveBaseUrls', () => {
   })
 
   it('resolves GLM endpoints by account mode', () => {
+    // 智谱 responses 端点（/api/v1/responses）独立于账号模式，payg/coding 均可用。
     expect(defaultCNAdaptiveBaseUrls('zhipu', 'payg')).toEqual({
       chat_completions: 'https://open.bigmodel.cn/api/paas/v4',
       anthropic: 'https://open.bigmodel.cn/api/anthropic',
-      responses: ''
+      responses: 'https://open.bigmodel.cn/api/v1'
     })
     expect(defaultCNAdaptiveBaseUrls('zhipu', 'coding')).toEqual({
       chat_completions: 'https://open.bigmodel.cn/api/coding/paas/v4',
       anthropic: 'https://open.bigmodel.cn/api/anthropic',
-      responses: ''
+      responses: 'https://open.bigmodel.cn/api/v1'
     })
   })
 

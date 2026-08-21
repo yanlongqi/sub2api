@@ -1062,17 +1062,7 @@ export interface UpstreamBillingProbeResult {
 // ==================== Upstream Quota Sync ====================
 
 export type UpstreamQuotaSyncStatus = 'ok' | 'unsupported' | 'failed'
-export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | 'zhipu' | 'volcengine' | 'opencode' | ''
-
-export interface UpstreamQuotaSyncZhipuQuota {
-  level?: string
-  five_hour_percent?: number
-  five_hour_reset_at?: string
-  weekly_percent?: number
-  weekly_reset_at?: string
-  period_percent?: number
-  period_reset_at?: string
-}
+export type UpstreamQuotaSyncMode = 'subscription' | 'balance' | 'quota_limited' | 'volcengine' | 'opencode' | ''
 
 // 火山方舟多窗口配额快照：Agent Plan 回绝对额度（quota/used），
 // Coding Plan 仅回百分比；reset_at 为 RFC3339。
@@ -1126,7 +1116,6 @@ export interface UpstreamQuotaSyncSnapshot {
   used?: number
   remaining?: number
   subscription?: UpstreamQuotaSyncSubscription
-  zhipu?: UpstreamQuotaSyncZhipuQuota
   volcengine?: UpstreamQuotaSyncVolcengineQuota
   opencode?: UpstreamQuotaSyncOpenCodeQuota
   balance?: number

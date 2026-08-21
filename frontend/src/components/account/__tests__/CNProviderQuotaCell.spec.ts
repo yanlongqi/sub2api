@@ -19,17 +19,19 @@ vi.mock('vue-i18n', () => ({
   })
 }))
 
+// CN 探测单元格仅 kimi 使用（智谱/DeepSeek 改走上游配额同步展示样式），
+// 额度快照 extra 键也改用 kimi_ 前缀。
 const account = {
   id: 7,
-  platform: 'zhipu',
+  platform: 'kimi',
   type: 'apikey',
   credentials: { account_mode: 'coding' },
   extra: {
-    zhipu_5h_used_percent: 0,
-    zhipu_weekly_used_percent: 27,
-    zhipu_5h_reset_at: '2026-08-18T12:30:00+08:00',
-    zhipu_weekly_reset_at: '2026-08-22T00:00:00+08:00',
-    zhipu_usage_updated_at: new Date().toISOString()
+    kimi_5h_used_percent: 0,
+    kimi_weekly_used_percent: 27,
+    kimi_5h_reset_at: '2026-08-18T12:30:00+08:00',
+    kimi_weekly_reset_at: '2026-08-22T00:00:00+08:00',
+    kimi_usage_updated_at: new Date().toISOString()
   }
 } as Account
 

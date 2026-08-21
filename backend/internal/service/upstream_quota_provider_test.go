@@ -53,46 +53,48 @@ func TestUpstreamQuotaProviderRegistryFallsBackToDefaultProvider(t *testing.T) {
 	require.Equal(t, defaultProvider, provider)
 }
 
-func TestDeepSeekQuotaProviderMatchesOnlyDeepSeekDomains(t *testing.T) {
-	provider := deepSeekQuotaProvider{}
+// 国产供应商原生平台账号走同一套上游配额同步：base URL 解析复用
+// GetOpenAIBaseURL（凭证 base_url / adaptive 分协议地址 / 平台默认）。
+// 智谱/DeepSeek 的配额/余额由原生 CN 服务负责，同步通道域名未命中
+// 官方域时回落 sub2api fallback，此处仅验证 base 解析。
+func TestUpstreamQuotaSyncBaseURLSupportsCNPlatforms(t *testing.T) {
+	withBaseURL := func(platform string) *Account {
+		return &Account{
+			Platform: platform,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"api_key": "sk-test",
+				"base_url": "https://relay.example.com/v1",
+			},
+		}
+	}
 
-	require.True(t, provider.Matches("https://api.deepseek.com"))
-	require.True(t, provider.Matches("https://tenant.deepseek.com/v1"))
-	require.False(t, provider.Matches("https://deepseek.com.evil.example"))
-	require.False(t, provider.Matches("https://deepseek.example.com"))
-}
+	// 凭证 base_url 优先（自适应/中转地址），域名未命中官方域时回落 sub2api fallback。
+	for _, platform := range []string{PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformOpenAI} {
+		account := withBaseURL(platform)
+		require.Equal(t, "https://relay.example.com/v1", upstreamQuotaSyncBaseURL(account), platform)
+	}
 
-func TestDeepSeekQuotaProviderUsesFixedBalanceURL(t *testing.T) {
-	provider := deepSeekQuotaProvider{}
+	// 无凭证 base_url 时按平台默认端点解析（zhipu 配额由原生 CNProviderQuotaService
+	// 负责，不再走同步上游通道，仅验证 base 解析）。
+	zhipuDefault := &Account{
+		Platform: PlatformZhipu,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":      "sk-test",
+			"account_mode": AccountModeCoding,
+		},
+	}
+	require.Equal(t, DefaultZhipuCodingBaseURL, upstreamQuotaSyncBaseURL(zhipuDefault))
 
-	require.Equal(t, "https://api.deepseek.com/user/balance", provider.UsageURL("https://tenant.deepseek.com/custom/path"))
-}
-
-func TestDeepSeekQuotaProviderParsesAllBalances(t *testing.T) {
-	provider := deepSeekQuotaProvider{}
-
-	parsed, err := provider.ParseResponse([]byte(`{
-		"is_available": true,
-		"balance_infos": [
-			{"currency": "CNY", "total_balance": "5.000000"},
-			{"currency": "USD", "total_balance": "2.5"}
-		]
-	}`))
-
-	require.NoError(t, err)
-	require.NotNil(t, parsed.balance)
-	require.InDelta(t, 7.5, *parsed.balance, 0.000001)
-	require.Equal(t, "CNY", parsed.currency)
-}
-
-func TestDeepSeekQuotaProviderRejectsMissingOrInvalidBalance(t *testing.T) {
-	provider := deepSeekQuotaProvider{}
-
-	_, err := provider.ParseResponse([]byte(`{"balance_infos": []}`))
-	require.Error(t, err)
-
-	_, err = provider.ParseResponse([]byte(`{"balance_infos":[{"total_balance":"not-a-number"}]}`))
-	require.Error(t, err)
+	deepseekDefault := &Account{
+		Platform: PlatformDeepseek,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+		},
+	}
+	require.Equal(t, DefaultDeepseekBaseURL, upstreamQuotaSyncBaseURL(deepseekDefault))
 }
 
 func TestParseUpstreamQuotaUsageResponseExtractsBalanceAndUnit(t *testing.T) {
@@ -116,90 +118,4 @@ func TestNormalizeUpstreamQuotaCurrencyDefaultsToCNY(t *testing.T) {
 	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("  "))
 	require.Equal(t, "USD", normalizeUpstreamQuotaCurrency("usd"))
 	require.Equal(t, "CNY", normalizeUpstreamQuotaCurrency("cny"))
-}
-
-func TestZhipuQuotaProviderMatchesOnlyOfficialDomains(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	require.True(t, provider.Matches("https://open.bigmodel.cn/api/paas/v4"))
-	require.True(t, provider.Matches("https://api.z.ai/api/paas/v4"))
-	require.False(t, provider.Matches("https://bigmodel.cn"))
-	require.False(t, provider.Matches("https://z.ai"))
-	require.False(t, provider.Matches("https://evilbigmodel.cn"))
-	require.False(t, provider.Matches("https://open.bigmodel.cn.evil.example"))
-	require.False(t, provider.Matches("https://api.deepseek.com"))
-	require.False(t, provider.Matches("https://example.com"))
-}
-
-func TestZhipuQuotaProviderUsesFixedOfficialURLs(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	require.Equal(t, "https://open.bigmodel.cn/api/monitor/usage/quota/limit", provider.UsageURL("https://open.bigmodel.cn/custom/path"))
-	require.Equal(t, "https://api.z.ai/api/monitor/usage/quota/limit", provider.UsageURL("https://api.z.ai/custom/path"))
-}
-
-func TestZhipuQuotaProviderAuthorizationHeaderOmitsBearer(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-	require.Equal(t, "sk-123", provider.AuthorizationHeader("sk-123"))
-}
-
-func TestZhipuQuotaProviderParsesTwoWindows(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	parsed, err := provider.ParseResponse([]byte(`{
-		"success": true,
-		"data": {
-			"level": "pro",
-			"limits": [
-				{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 26.0, "nextResetTime": 1774967594803},
-				{"type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 5.0, "nextResetTime": 1780143594803}
-			]
-		}
-	}`))
-
-	require.NoError(t, err)
-	require.NotNil(t, parsed.zhipu)
-	require.Equal(t, "pro", parsed.zhipu.Level)
-	require.InDelta(t, 26.0, parsed.zhipu.FiveHourPercent, 0.000001)
-	require.NotEmpty(t, parsed.zhipu.FiveHourResetAt)
-	require.InDelta(t, 5.0, parsed.zhipu.WeeklyPercent, 0.000001)
-	require.NotEmpty(t, parsed.zhipu.WeeklyResetAt)
-}
-
-func TestZhipuQuotaProviderParsesPeriodLimit(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	// 老套餐形态：TIME_LIMIT（订阅周期额度）+ 单条 TOKENS_LIMIT（5h）。
-	parsed, err := provider.ParseResponse([]byte(`{
-		"success": true,
-		"data": {
-			"level": "max",
-			"limits": [
-				{"type": "TIME_LIMIT", "unit": 5, "number": 1, "usage": 4000, "remaining": 3890, "percentage": 2, "currentValue": 110, "nextResetTime": 1789207208997},
-				{"type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 34, "nextResetTime": 1787136499883}
-			]
-		}
-	}`))
-
-	require.NoError(t, err)
-	require.NotNil(t, parsed.zhipu)
-	require.Equal(t, "max", parsed.zhipu.Level)
-	require.InDelta(t, 34.0, parsed.zhipu.FiveHourPercent, 0.000001)
-	require.InDelta(t, 2.0, parsed.zhipu.PeriodPercent, 0.000001)
-	require.NotEmpty(t, parsed.zhipu.PeriodResetAt)
-	require.Equal(t, 0.0, parsed.zhipu.WeeklyPercent)
-}
-
-func TestZhipuQuotaProviderRejectsBusinessError(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	_, err := provider.ParseResponse([]byte(`{"success": false, "msg": "invalid api key"}`))
-	require.Error(t, err)
-}
-
-func TestZhipuQuotaProviderRejectsMissingData(t *testing.T) {
-	provider := zhipuQuotaProvider{}
-
-	_, err := provider.ParseResponse([]byte(`{"success": true}`))
-	require.Error(t, err)
 }

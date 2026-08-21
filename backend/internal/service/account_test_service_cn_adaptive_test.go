@@ -83,13 +83,14 @@ data: {"type":"response.completed"}
 }
 
 func TestAccountTestService_AdaptiveChatOnlyProvidersTestChatAndAnthropicEndpoints(t *testing.T) {
+	// 仅 Kimi 无原生 /responses 端点；智谱（Coding Plan）与 DeepSeek 会追加
+	// Responses 探测（见下方专项用例）。
 	for index, testCase := range []struct {
 		name     string
 		platform string
 		model    string
 	}{
 		{name: "Kimi", platform: PlatformKimi, model: "kimi-k2.5"},
-		{name: "Zhipu", platform: PlatformZhipu, model: "glm-4.7"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			account := adaptiveCNAccountTestAccount(int64(301+index), testCase.platform)
@@ -136,6 +137,27 @@ func TestAccountTestService_AdaptiveDeepSeekAlsoTestsResponsesEndpoint(t *testin
 	require.False(t, gjson.GetBytes(upstream.bodies[2], "store").Bool())
 	require.False(t, gjson.GetBytes(upstream.bodies[2], "instructions").Exists())
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"test_complete"`))
+	require.Contains(t, recorder.Body.String(), "已通过原生 /responses 验证")
+}
+
+func TestAccountTestService_AdaptiveZhipuAlsoTestsResponsesEndpoint(t *testing.T) {
+	account := adaptiveCNAccountTestAccount(304, PlatformZhipu)
+	svc, upstream := adaptiveCNAccountTestService(
+		account,
+		adaptiveCNChatTestResponse(),
+		adaptiveCNAnthropicTestResponse(),
+		adaptiveCNResponsesTestResponse(),
+	)
+	c, recorder := newTestContext()
+
+	err := svc.TestAccountConnection(c, account.ID, "glm-4.7", "", AccountTestModeDefault)
+
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 3)
+	// 智谱 responses 走标准 /v1/responses 拼接（非 deepseek 的无前缀例外）。
+	require.Equal(t, "http://responses.example/v1/responses", upstream.requests[2].URL.String())
+	require.Equal(t, "Bearer sk-adaptive-test", upstream.requests[2].Header.Get("Authorization"))
+	require.False(t, gjson.GetBytes(upstream.bodies[2], "store").Bool())
 	require.Contains(t, recorder.Body.String(), "已通过原生 /responses 验证")
 }
 

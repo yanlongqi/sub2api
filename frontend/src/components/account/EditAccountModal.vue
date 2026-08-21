@@ -86,8 +86,9 @@
           />
           <p class="input-hint">{{ t('admin.accounts.homepageUrlHint') }}</p>
         </div>
-        <!-- Account Mode Selection (CN providers) -->
-        <div v-if="isCNApiKeyAccount">
+        <!-- Account Mode Selection (Kimi / Zhipu：DeepSeek 仅按量付费)。
+             Coding Plan 时配额控制卡片隐藏——套餐额度由内部周期探测自动刷新。 -->
+        <div v-if="isCNApiKeyAccount && props.account?.platform !== 'deepseek'">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
           <div class="mt-2 flex flex-wrap gap-2">
             <button
@@ -1909,7 +1910,8 @@
         </div>
       </div>
 
-      <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
+      <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和)。CN 供应商
+           Coding Plan 账号不显示：套餐额度由内部周期探测自动刷新，无需配置。 -->
       <div
         v-if="account?.platform === 'anthropic' && (account?.type === 'apikey' || account?.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
@@ -1967,9 +1969,10 @@
           @update:volcengineSecretAccessKey="editVolcengineSecretAccessKey = $event"
         />
       </div>
-      <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
+      <!-- 配额控制 (非 Anthropic apikey/bedrock)。CN 供应商 Coding Plan
+           账号不显示：套餐额度由内部周期探测自动刷新，无需配置。 -->
       <div
-        v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
+        v-else-if="(account?.type === 'apikey' || account?.type === 'bedrock') && !isCNCodingPlan"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2988,16 +2991,17 @@ const editAdaptiveBaseUrls = ref<Record<CnNativeApiProtocol, string>>({
 // nextTick 后解除，此后用户主动切换模式/协议仍正常联动重置。
 const syncingForm = ref(false)
 const cnAccountModeOptions = computed<Array<{ value: CnAccountMode; labelKey: 'payg' | 'coding' }>>(
-  () => {
-    // DeepSeek 无 coding 套餐（与创建弹窗一致），仅保留按量付费。
-    if (props.account?.platform === 'deepseek') {
-      return [{ value: 'payg', labelKey: 'payg' }]
-    }
-    return [
-      { value: 'payg', labelKey: 'payg' },
-      { value: 'coding', labelKey: 'coding' }
-    ]
-  }
+  () => [
+    { value: 'payg', labelKey: 'payg' },
+    { value: 'coding', labelKey: 'coding' }
+  ]
+)
+// CN 供应商 Coding Plan 账号（kimi/zhipu + coding）及 DeepSeek（仅按量付费，
+// 用量/余额由 CN 周期探测自动刷新）：配额控制卡片不显示，前端只展示。
+const isCNCodingPlan = computed(
+  () =>
+    isCNApiKeyAccount.value &&
+    (props.account?.platform === 'deepseek' || editAccountMode.value === 'coding')
 )
 const cnProtocolOptions = computed<Array<{ value: CnApiProtocol; labelKey: string }>>(() => {
   const opts: Array<{ value: CnApiProtocol; labelKey: string }> = [
@@ -3005,7 +3009,7 @@ const cnProtocolOptions = computed<Array<{ value: CnApiProtocol; labelKey: strin
     { value: 'chat_completions', labelKey: 'chatCompletions' },
     { value: 'anthropic', labelKey: 'anthropic' }
   ]
-  if (props.account?.platform === 'deepseek') {
+  if (props.account?.platform === 'deepseek' || props.account?.platform === 'zhipu') {
     opts.push({ value: 'responses', labelKey: 'responses' })
   }
   return opts
@@ -3015,7 +3019,7 @@ const editAdaptiveProtocolOptions = computed<Array<{ value: CnNativeApiProtocol;
     { value: 'chat_completions', labelKey: 'chatCompletions' },
     { value: 'anthropic', labelKey: 'anthropic' }
   ]
-  if (props.account?.platform === 'deepseek') opts.push({ value: 'responses', labelKey: 'responses' })
+  if (props.account?.platform === 'deepseek' || props.account?.platform === 'zhipu') opts.push({ value: 'responses', labelKey: 'responses' })
   return opts
 })
 watch(editApiProtocol, (protocol, previousProtocol) => {
@@ -3903,7 +3907,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // 国产供应商：读取 account_mode 与 api_protocol 作为可编辑初始值
     // （编辑弹窗允许修正两者，用于修复早期存错默认值的账号）。
     if (newAccount.platform === 'kimi' || newAccount.platform === 'zhipu' || newAccount.platform === 'deepseek') {
-      editAccountMode.value = credentials.account_mode === 'coding' ? 'coding' : 'payg'
+      // deepseek 无 coding 套餐：固定 payg 语义。
+      editAccountMode.value =
+        newAccount.platform !== 'deepseek' && credentials.account_mode === 'coding' ? 'coding' : 'payg'
       const storedProtocol = credentials.api_protocol
       editApiProtocol.value =
         storedProtocol === 'adaptive' ||
@@ -3912,7 +3918,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         storedProtocol === 'responses'
           ? storedProtocol
           : 'chat_completions'
-      if (newAccount.platform !== 'deepseek' && editApiProtocol.value === 'responses') {
+      // responses 仅 deepseek/智谱（Coding Plan）合法；kimi 存量误值回退。
+      if (newAccount.platform === 'kimi' && editApiProtocol.value === 'responses') {
         editApiProtocol.value = 'chat_completions'
       }
       const adaptiveDefaults = defaultCNAdaptiveBaseUrls(newAccount.platform, editAccountMode.value)
@@ -4641,8 +4648,10 @@ const handleSubmit = async () => {
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
+      // coding 走内部周期探测；deepseek 固定 payg。
       if (isCNApiKeyAccount.value) {
-        newCredentials.account_mode = editAccountMode.value
+        newCredentials.account_mode =
+          props.account!.platform === 'deepseek' ? 'payg' : editAccountMode.value
         newCredentials.api_protocol = editApiProtocol.value
         if (editApiProtocol.value === 'adaptive') {
           const defaults = defaultCNAdaptiveBaseUrls(cnPresetPlatform.value, editAccountMode.value)

@@ -161,6 +161,30 @@ func TestParseZhipuTokenTiers_IgnoresNonTokenEntries(t *testing.T) {
 	require.Empty(t, parseZhipuTokenTiers(data))
 }
 
+// TestParseZhipuTokenTiers_TimeLimitAsMcp TIME_LIMIT（阅周期额度，如 MCP 工具额度）
+// 单独解析为 mcp 窗口，不参与 5h/weekly 槽位竞争。
+func TestParseZhipuTokenTiers_TimeLimitAsMcp(t *testing.T) {
+	t.Parallel()
+	data := gjson.Parse(`{
+		"limits": [
+			{"type":"TOKENS_LIMIT","unit":3,"percentage":20,"nextResetTime":1700000099999},
+			{"type":"TIME_LIMIT","percentage":35,"nextResetTime":1700000300000}
+		]
+	}`)
+	tiers := parseZhipuTokenTiers(data)
+	require.Len(t, tiers, 2)
+	require.Equal(t, "5h", tiers[0].Window)
+	require.Equal(t, "mcp", tiers[1].Window)
+	require.InDelta(t, 35.0, tiers[1].UsedPercent, 1e-9)
+	require.NotEmpty(t, tiers[1].ResetAt)
+
+	// 无 TIME_LIMIT 条目时不产出 mcp 窗口。
+	noTime := gjson.Parse(`{"limits":[{"type":"TOKENS_LIMIT","unit":3,"percentage":20}]}`)
+	for _, tier := range parseZhipuTokenTiers(noTime) {
+		require.NotEqual(t, "mcp", tier.Window)
+	}
+}
+
 // TestCNQuotaExtraUpdates 验证 tier 列表落 Extra 快照键的 provider 前缀与窗口映射。
 func TestCNQuotaExtraUpdates(t *testing.T) {
 	t.Parallel()
@@ -168,13 +192,16 @@ func TestCNQuotaExtraUpdates(t *testing.T) {
 	tiers := []CNQuotaTier{
 		{Window: "5h", UsedPercent: 40, ResetAt: "2026-08-14T15:00:00Z"},
 		{Window: "weekly", UsedPercent: 60, ResetAt: "2026-08-18T00:00:00Z"},
+		{Window: "mcp", UsedPercent: 35, ResetAt: "2026-08-31T00:00:00Z"},
 	}
-	updates := cnQuotaExtraUpdates(PlatformKimi, tiers, now)
-	require.Equal(t, 40.0, updates["kimi_5h_used_percent"])
-	require.Equal(t, "2026-08-14T15:00:00Z", updates["kimi_5h_reset_at"])
-	require.Equal(t, 60.0, updates["kimi_weekly_used_percent"])
-	require.Equal(t, "2026-08-18T00:00:00Z", updates["kimi_weekly_reset_at"])
-	require.Equal(t, now.Format(time.RFC3339), updates["kimi_usage_updated_at"])
+	updates := cnQuotaExtraUpdates(PlatformZhipu, tiers, now)
+	require.Equal(t, 40.0, updates["zhipu_5h_used_percent"])
+	require.Equal(t, "2026-08-14T15:00:00Z", updates["zhipu_5h_reset_at"])
+	require.Equal(t, 60.0, updates["zhipu_weekly_used_percent"])
+	require.Equal(t, "2026-08-18T00:00:00Z", updates["zhipu_weekly_reset_at"])
+	require.Equal(t, 35.0, updates["zhipu_mcp_used_percent"])
+	require.Equal(t, "2026-08-31T00:00:00Z", updates["zhipu_mcp_reset_at"])
+	require.Equal(t, now.Format(time.RFC3339), updates["zhipu_usage_updated_at"])
 }
 
 // TestCNProviderResponseIndicatesInsufficientBalance 覆盖中英文余额不足文案与否定用例。
@@ -469,7 +496,8 @@ func TestBuildUpstreamModelsRequest_CNProviders(t *testing.T) {
 }
 
 // TestGetAPIProtocol 验证协议凭证维度的平台校验矩阵：
-// responses 仅 deepseek；缺失/非法值回退 chat_completions（与旧行为一致）。
+// responses 由 deepseek 与智谱（Coding Plan）支持；缺失/非法值回退
+// chat_completions（与旧行为一致）。
 func TestGetAPIProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -486,11 +514,11 @@ func TestGetAPIProtocol(t *testing.T) {
 	require.Equal(t, APIProtocolAnthropic, mk(PlatformKimi, APIProtocolAnthropic).GetAPIProtocol())
 	require.Equal(t, APIProtocolAnthropic, mk(PlatformDeepseek, APIProtocolAnthropic).GetAPIProtocol())
 	require.Equal(t, APIProtocolResponses, mk(PlatformDeepseek, APIProtocolResponses).GetAPIProtocol())
+	require.Equal(t, APIProtocolResponses, mk(PlatformZhipu, APIProtocolResponses).GetAPIProtocol())
 	require.Equal(t, APIProtocolAdaptive, mk(PlatformKimi, APIProtocolAdaptive).GetAPIProtocol())
 	require.Equal(t, APIProtocolAdaptive, mk(PlatformZhipu, APIProtocolAdaptive).GetAPIProtocol())
 	require.Equal(t, APIProtocolAdaptive, mk(PlatformDeepseek, APIProtocolAdaptive).GetAPIProtocol())
 	require.Equal(t, APIProtocolChatCompletions, mk(PlatformKimi, APIProtocolResponses).GetAPIProtocol(), "kimi 无 responses 端点")
-	require.Equal(t, APIProtocolChatCompletions, mk(PlatformZhipu, APIProtocolResponses).GetAPIProtocol(), "zhipu 无 responses 端点")
 	require.Equal(t, APIProtocolChatCompletions, mk(PlatformKimi, "bogus").GetAPIProtocol(), "非法值回退默认")
 	require.Equal(t, APIProtocolChatCompletions, (&Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}).GetAPIProtocol(), "非 CN 供应商恒为默认")
 }
@@ -508,8 +536,8 @@ func TestAdaptiveProtocolBaseURLs(t *testing.T) {
 	}{
 		{"kimi payg", PlatformKimi, AccountModePayG, DefaultKimiPayGBaseURL, DefaultKimiPayGAnthropicBaseURL, DefaultKimiPayGBaseURL},
 		{"kimi coding", PlatformKimi, AccountModeCoding, DefaultKimiCodingBaseURL, DefaultKimiCodingAnthropicBaseURL, DefaultKimiCodingBaseURL},
-		{"zhipu payg", PlatformZhipu, AccountModePayG, DefaultZhipuPayGBaseURL, DefaultZhipuAnthropicBaseURL, DefaultZhipuPayGBaseURL},
-		{"zhipu coding", PlatformZhipu, AccountModeCoding, DefaultZhipuCodingBaseURL, DefaultZhipuAnthropicBaseURL, DefaultZhipuCodingBaseURL},
+		{"zhipu payg", PlatformZhipu, AccountModePayG, DefaultZhipuPayGBaseURL, DefaultZhipuAnthropicBaseURL, DefaultZhipuResponsesBaseURL},
+		{"zhipu coding", PlatformZhipu, AccountModeCoding, DefaultZhipuCodingBaseURL, DefaultZhipuAnthropicBaseURL, DefaultZhipuResponsesBaseURL},
 		{"deepseek", PlatformDeepseek, AccountModePayG, DefaultDeepseekBaseURL, DefaultDeepseekAnthropicBaseURL, DefaultDeepseekBaseURL},
 	}
 

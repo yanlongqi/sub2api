@@ -439,9 +439,10 @@ func TestMonitorAccountQuotaCapability_Matrix(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "deepseek coding has no quota endpoint",
+			// deepseek 无 coding plan：误存 account_mode=coding 被 IsCodingPlan
+			// 防御视为 payg → 有余额端点，可作为配额数据源。
+			name:    "deepseek miscoded coding treated as payg ok",
 			account: &Account{ID: 1, Platform: domain.PlatformDeepseek, Credentials: map[string]any{"account_mode": AccountModeCoding}},
-			wantErr: ErrChannelMonitorAccountNotSupportable,
 		},
 		{
 			// 自定义域名 kimi coding：GetCodingPlanProvider 识别不到 → 无额度端点。
@@ -521,21 +522,23 @@ func TestMonitorAccountQuotaCapability_Matrix(t *testing.T) {
 
 func TestValidateLinkedAccount_CapabilityRejected(t *testing.T) {
 	svc := NewChannelMonitorService(nil, nil)
+	// zhipu payg 无余额端点且非 coding plan → 不可作配额数据源。
+	//（deepseek 误存 coding 已被 IsCodingPlan 防御视为 payg，可用。）
 	svc.SetQuotaFetcher(newQuotaModeFetcher(map[int64]*Account{
-		1: {ID: 1, Platform: domain.PlatformDeepseek, Credentials: map[string]any{"account_mode": AccountModeCoding}},
+		1: {ID: 1, Platform: domain.PlatformZhipu},
 	}, nil))
 
-	err := svc.validateLinkedAccount(context.Background(), MonitorProviderDeepseek, int64Ptr(1))
+	err := svc.validateLinkedAccount(context.Background(), MonitorProviderZhipu, int64Ptr(1))
 	require.ErrorIs(t, err, ErrChannelMonitorAccountNotSupportable)
 }
 
 func TestRevalidateLinkedAccount_Capability(t *testing.T) {
 	svc := NewChannelMonitorService(nil, nil)
 	svc.SetQuotaFetcher(newQuotaModeFetcher(map[int64]*Account{
-		2: {ID: 2, Platform: domain.PlatformDeepseek, Credentials: map[string]any{"account_mode": AccountModeCoding}},
+		2: {ID: 2, Platform: domain.PlatformZhipu},
 	}, nil))
 
-	quota := &ChannelMonitor{Provider: MonitorProviderDeepseek, CheckMode: MonitorCheckModeQuota, AccountID: int64Ptr(2)}
+	quota := &ChannelMonitor{Provider: MonitorProviderZhipu, CheckMode: MonitorCheckModeQuota, AccountID: int64Ptr(2)}
 	require.ErrorIs(t, svc.revalidateLinkedAccount(context.Background(), quota), ErrChannelMonitorAccountNotSupportable)
 	require.NotNil(t, quota.AccountID, "quota mode keeps the binding for the admin to fix")
 

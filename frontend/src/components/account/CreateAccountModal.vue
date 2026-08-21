@@ -453,8 +453,10 @@
         </div>
       </div>
 
-      <!-- Account Mode Selection (Kimi / Zhipu / DeepSeek) -->
-      <div v-if="isCNPlatform">
+      <!-- Account Mode Selection (Kimi / Zhipu：DeepSeek 仅按量付费)。
+           智谱选 Coding Plan 时配额控制卡片隐藏——套餐额度由内部周期探测
+           自动刷新，无需任何配置。 -->
+      <div v-if="isCNPlatform && form.platform !== 'deepseek'">
         <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
         <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2" data-tour="account-form-mode">
           <!-- Pay-as-you-go (token balance) -->
@@ -483,9 +485,8 @@
               <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.cnProviders.accountMode.paygDesc') }}</span>
             </div>
           </button>
-          <!-- Coding Plan (kimi / zhipu only — DeepSeek has no coding plan) -->
+          <!-- Coding Plan (kimi / zhipu)：外层 v-if 已排除 deepseek -->
           <button
-            v-if="form.platform !== 'deepseek'"
             type="button"
             @click="accountMode = 'coding'"
             :class="[
@@ -1994,7 +1995,8 @@
         </div>
       </div>
 
-      <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和) -->
+      <!-- 配额控制 (Anthropic apikey/bedrock: 配额限制 + 亲和)。CN 供应商
+           Coding Plan 账号不显示：套餐额度由内部周期探测自动刷新，无需配置。 -->
       <div
         v-if="form.platform === 'anthropic' && (form.type === 'apikey' || form.type === 'bedrock')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
@@ -2053,9 +2055,10 @@
         />
       </div>
 
-      <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
+      <!-- 配额控制 (非 Anthropic apikey/bedrock)。CN 供应商 Coding Plan
+           账号不显示：套餐额度由内部周期探测自动刷新，无需配置。 -->
       <div
-        v-else-if="form.type === 'apikey' || form.type === 'bedrock'"
+        v-else-if="(form.type === 'apikey' || form.type === 'bedrock') && !isCNCodingPlan"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -3991,6 +3994,14 @@ const adaptiveBaseUrls = ref<Record<CnNativeApiProtocol, string>>({
 const isCNPlatform = computed(
   () => form.platform === 'kimi' || form.platform === 'zhipu' || form.platform === 'deepseek'
 )
+// CN 供应商 Coding Plan 账号（kimi/zhipu + coding）及 DeepSeek（仅按量付费，
+// 用量/余额由 CN 周期探测自动刷新）：配额控制卡片不显示，前端只展示。
+const isCNCodingPlan = computed(
+  () =>
+    form.platform === 'deepseek' ||
+    ((form.platform === 'kimi' || form.platform === 'zhipu') &&
+      accountMode.value === 'coding')
+)
 // CnBaseUrlPresets 的 platform prop 是平台字面量联合类型，模板里不能写
 // `as` 断言（其中的 `|` 会被 eslint 误判为 Vue2 filter 语法），经此 computed 传递。
 const cnPresetPlatform = computed<'kimi' | 'zhipu' | 'deepseek'>(() => {
@@ -3999,14 +4010,14 @@ const cnPresetPlatform = computed<'kimi' | 'zhipu' | 'deepseek'>(() => {
   }
   return 'kimi'
 })
-// 当前平台可选的协议档（responses 仅 deepseek）。
+// 当前平台可选的协议档（responses 由 deepseek 与智谱支持，智谱 payg/coding 均可）。
 const cnProtocolOptions = computed<Array<{ value: CnApiProtocol; labelKey: string }>>(() => {
   const opts: Array<{ value: CnApiProtocol; labelKey: string }> = [
     { value: 'adaptive', labelKey: 'adaptive' },
     { value: 'chat_completions', labelKey: 'chatCompletions' },
     { value: 'anthropic', labelKey: 'anthropic' }
   ]
-  if (form.platform === 'deepseek') {
+  if (form.platform === 'deepseek' || form.platform === 'zhipu') {
     opts.push({ value: 'responses', labelKey: 'responses' })
   }
   return opts
@@ -4016,7 +4027,7 @@ const cnAdaptiveProtocolOptions = computed<Array<{ value: CnNativeApiProtocol; l
     { value: 'chat_completions', labelKey: 'chatCompletions' },
     { value: 'anthropic', labelKey: 'anthropic' }
   ]
-  if (form.platform === 'deepseek') opts.push({ value: 'responses', labelKey: 'responses' })
+  if (form.platform === 'deepseek' || form.platform === 'zhipu') opts.push({ value: 'responses', labelKey: 'responses' })
   return opts
 })
 
@@ -4061,7 +4072,7 @@ function selectCNPlatform(platform: 'kimi' | 'zhipu' | 'deepseek') {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
-// 账号类型 / 协议变更时同步默认 base url。
+// 账号类型 / 协议变更时同步默认 base url（deepseek 固定 payg）。
 watch(accountMode, (mode, previousMode) => {
   if (!isCNPlatform.value) return
   if (apiProtocol.value === 'adaptive') {
@@ -4089,9 +4100,11 @@ watch(apiProtocol, (protocol) => {
   }
   apiKeyBaseUrl.value = defaultCNBaseUrl(form.platform, accountMode.value, protocol)
 })
-// 点击预设端点：同时回填 base url、账号类型与协议。
+// 点击预设端点：回填 base url、账号类型与协议（deepseek 固定 payg）。
 function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol; url: string }) {
-  accountMode.value = preset.mode
+  if (form.platform !== 'deepseek') {
+    accountMode.value = preset.mode
+  }
   apiProtocol.value = preset.protocol
   apiKeyBaseUrl.value = preset.url
 }
@@ -5520,9 +5533,10 @@ const handleSubmit = async () => {
   }
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
-  // 额度/余额探测，按 api_protocol 路由转发端点与格式。
+  // 额度/余额探测（coding 走内部周期探测，无需配额控制配置），
+  // 按 api_protocol 路由转发端点与格式。
   if (form.platform === 'kimi' || form.platform === 'zhipu' || form.platform === 'deepseek') {
-    credentials.account_mode = accountMode.value
+    credentials.account_mode = form.platform === 'deepseek' ? 'payg' : accountMode.value
     credentials.api_protocol = apiProtocol.value
     if (apiProtocol.value === 'adaptive') {
       const defaults = defaultCNAdaptiveBaseUrls(form.platform, accountMode.value)

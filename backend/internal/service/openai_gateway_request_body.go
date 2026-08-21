@@ -47,7 +47,8 @@ func buildOpenAIResponsesURL(base string) string {
 
 // buildOpenAIResponsesURLForPlatform 组装 Responses 端点（平台感知）。
 // DeepSeek 官方 Responses 端点为 /responses（无 /v1 前缀，适配 Codex）；
-// 其余平台维持 /v1/responses。
+// 智谱 responses 协议 base 为 /api/v1，buildOpenAIEndpointURL 对 /v1 结尾
+// 追加 /responses → /api/v1/responses；其余平台维持 /v1/responses。
 func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
 	if platform == PlatformDeepseek {
 		return buildOpenAIEndpointURL(base, "/responses")
@@ -55,11 +56,12 @@ func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
 	return buildOpenAIResponsesURL(base)
 }
 
-// normalizeDeepSeekResponsesRequestBody 适配 DeepSeek 无状态 Responses 端点：
-// 强制 store=false 并清除 previous_response_id（官方 /responses 不支持服务端
-// 状态存储，携带这些字段会被拒绝）。非 deepseek responses 协议账号原样返回。
+// normalizeDeepSeekResponsesRequestBody 适配无状态 Responses 端点
+//（DeepSeek / 智谱 Coding）：强制 store=false 并清除 previous_response_id
+//（官方 /responses 不支持服务端状态存储，携带这些字段会被拒绝）。
+// 非 responses 协议账号原样返回。
 func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte {
-	if account == nil || account.Platform != PlatformDeepseek ||
+	if account == nil || (account.Platform != PlatformDeepseek && account.Platform != PlatformZhipu) ||
 		(account.GetAPIProtocol() != APIProtocolResponses && !account.IsAdaptiveAPIProtocol()) {
 		return body
 	}

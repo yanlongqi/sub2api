@@ -56,7 +56,6 @@ const (
 	UpstreamQuotaSyncModeSubscription = "subscription"
 	UpstreamQuotaSyncModeBalance      = "balance"
 	UpstreamQuotaSyncModeQuotaLimited = "quota_limited"
-	UpstreamQuotaSyncModeZhipu        = "zhipu"
 	UpstreamQuotaSyncModeVolcengine   = "volcengine"
 	UpstreamQuotaSyncModeOpenCode     = "opencode"
 )
@@ -75,8 +74,6 @@ type UpstreamQuotaSyncSnapshot struct {
 	Balance         *float64    `json:"balance,omitempty"`
 	// 余额模式的货币单位（上游 unit 字段，如 CNY/USD；空时前端默认 CNY）。
 	Currency        string      `json:"currency,omitempty"`
-	// 智谱模式：Coding Plan 滚动窗口已用百分比（5h + weekly 双窗口）。
-	Zhipu           *UpstreamQuotaSyncZhipuQuota `json:"zhipu,omitempty"`
 	// 火山方舟模式：Agent Plan（绝对额度）/ Coding Plan（百分比）多窗口快照。
 	Volcengine      *UpstreamQuotaSyncVolcengineQuota `json:"volcengine,omitempty"`
 	// OpenCode Zen Go 订阅模式：rolling/weekly/monthly 三窗口已用百分比。
@@ -87,19 +84,6 @@ type UpstreamQuotaSyncSnapshot struct {
 	FailureCount    int         `json:"failure_count,omitempty"`
 	HTTPStatus      int         `json:"http_status,omitempty"`
 	LastError       string      `json:"last_error,omitempty"`
-}
-
-// UpstreamQuotaSyncZhipuQuota 是智谱 Coding Plan 配额的多窗口快照（已用百分比）。
-// 5h 为 5 小时滚动窗口，weekly 为每周窗口（新套餐），period 为订阅周期额度
-// （TIME_LIMIT，如 MCP 工具额度）；reset_at 为下次重置时间（RFC3339）。
-type UpstreamQuotaSyncZhipuQuota struct {
-	Level           string  `json:"level,omitempty"`
-	FiveHourPercent float64 `json:"five_hour_percent,omitempty"`
-	FiveHourResetAt string  `json:"five_hour_reset_at,omitempty"`
-	WeeklyPercent   float64 `json:"weekly_percent,omitempty"`
-	WeeklyResetAt   string  `json:"weekly_reset_at,omitempty"`
-	PeriodPercent   float64 `json:"period_percent,omitempty"`
-	PeriodResetAt   string  `json:"period_reset_at,omitempty"`
 }
 
 // UpstreamQuotaSyncVolcengineQuota 是火山方舟配额的多窗口快照。
@@ -223,7 +207,7 @@ func NewUpstreamQuotaSyncService(
 		syncSlots:          make(chan struct{}, upstreamQuotaSyncConcurrency),
 		now:                time.Now,
 		instanceID:         uuid.NewString(),
-		quotaProviders:     newUpstreamQuotaProviderRegistry(zhipuQuotaProvider{}, volcengineQuotaProvider{}, openCodeZenGoQuotaProvider{}, deepSeekQuotaProvider{}, defaultSub2APIQuotaProvider{}),
+		quotaProviders:     newUpstreamQuotaProviderRegistry(volcengineQuotaProvider{}, openCodeZenGoQuotaProvider{}, defaultSub2APIQuotaProvider{}),
 	}
 }
 
@@ -531,16 +515,22 @@ func (s *UpstreamQuotaSyncService) syncLoadedAccount(ctx context.Context, accoun
 		snapshot.Balance = &bal
 		snapshot.Currency = normalizeUpstreamQuotaCurrency(parsed.currency)
 	}
-	// 智谱模式：填充 5h + weekly + 订阅周期多窗口快照。
-	if mode == UpstreamQuotaSyncModeZhipu && parsed.zhipu != nil {
-		snapshot.Zhipu = &UpstreamQuotaSyncZhipuQuota{
-			Level:           parsed.zhipu.Level,
-			FiveHourPercent: parsed.zhipu.FiveHourPercent,
-			FiveHourResetAt: parsed.zhipu.FiveHourResetAt,
-			WeeklyPercent:   parsed.zhipu.WeeklyPercent,
-			WeeklyResetAt:   parsed.zhipu.WeeklyResetAt,
-			PeriodPercent:   parsed.zhipu.PeriodPercent,
-			PeriodResetAt:   parsed.zhipu.PeriodResetAt,
+	// 火山方舟模式：多窗口快照。
+	if mode == UpstreamQuotaSyncModeVolcengine && parsed.volcengine != nil {
+		snapshot.Volcengine = &UpstreamQuotaSyncVolcengineQuota{
+			PlanType:        parsed.volcengine.PlanType,
+			FiveHourQuota:   parsed.volcengine.FiveHourQuota,
+			FiveHourUsed:    parsed.volcengine.FiveHourUsed,
+			FiveHourPercent: parsed.volcengine.FiveHourPercent,
+			FiveHourResetAt: parsed.volcengine.FiveHourResetAt,
+			WeeklyQuota:     parsed.volcengine.WeeklyQuota,
+			WeeklyUsed:      parsed.volcengine.WeeklyUsed,
+			WeeklyPercent:   parsed.volcengine.WeeklyPercent,
+			WeeklyResetAt:   parsed.volcengine.WeeklyResetAt,
+			MonthlyQuota:    parsed.volcengine.MonthlyQuota,
+			MonthlyUsed:     parsed.volcengine.MonthlyUsed,
+			MonthlyPercent:  parsed.volcengine.MonthlyPercent,
+			MonthlyResetAt:  parsed.volcengine.MonthlyResetAt,
 		}
 	}
 	// OpenCode Zen Go 模式：填充 rolling/weekly/monthly 三窗口快照。
@@ -768,24 +758,6 @@ func (s *UpstreamQuotaSyncService) persistSnapshot(ctx context.Context, account 
 				persistSubscriptionWindow(updates, "weekly", snapshot.Subscription.Weekly)
 				persistSubscriptionWindow(updates, "monthly", snapshot.Subscription.Monthly)
 			}
-		} else if snapshot.Mode == UpstreamQuotaSyncModeZhipu {
-			// 智谱百分比配额：不写顶层 quota_limit/quota_used（无绝对额度），
-			// 写 zhipu_5h/weekly 快照键供调度阈值评估（cnProviderThresholdCandidates）复用。
-			updates["quota_limit"] = nil
-			updates["quota_used"] = nil
-			clearSubscriptionWindow(updates, "daily")
-			clearSubscriptionWindow(updates, "weekly")
-			clearSubscriptionWindow(updates, "monthly")
-			if snapshot.Zhipu != nil {
-				updates[cnExtraKey(PlatformZhipu, cnExtraSuffix5hUsed)] = snapshot.Zhipu.FiveHourPercent
-				updates[cnExtraKey(PlatformZhipu, cnExtraSuffixWeeklyUsed)] = snapshot.Zhipu.WeeklyPercent
-				if snapshot.Zhipu.FiveHourResetAt != "" {
-					updates[cnExtraKey(PlatformZhipu, cnExtraSuffix5hReset)] = snapshot.Zhipu.FiveHourResetAt
-				}
-				if snapshot.Zhipu.WeeklyResetAt != "" {
-					updates[cnExtraKey(PlatformZhipu, cnExtraSuffixWeeklyReset)] = snapshot.Zhipu.WeeklyResetAt
-				}
-			}
 		} else if snapshot.Mode == UpstreamQuotaSyncModeVolcengine {
 			// 火山方舟多窗口配额：不写顶层 quota_limit/quota_used（无单一总额概念），
 			// 写 volcengine_5h/weekly 快照键供调度阈值评估与前端展示。
@@ -933,7 +905,6 @@ type parsedUpstreamQuotaUsage struct {
 		ExpiresAt         *string
 	}
 	balance    *float64
-	zhipu      *parsedZhipuQuota
 	volcengine *parsedVolcengineQuota
 	opencode   *parsedOpenCodeZenGoQuota
 }
@@ -963,17 +934,6 @@ type parsedOpenCodeZenGoQuota struct {
 	WeeklyResetAt   string
 	MonthlyPercent  float64
 	MonthlyResetAt  string
-}
-
-// parsedZhipuQuota 是智谱配额响应的解析结果（5h + weekly + 订阅周期已用百分比）。
-type parsedZhipuQuota struct {
-	Level           string
-	FiveHourPercent float64
-	FiveHourResetAt string
-	WeeklyPercent   float64
-	WeeklyResetAt   string
-	PeriodPercent   float64
-	PeriodResetAt   string
 }
 
 func parseUpstreamQuotaUsageResponse(body []byte) (parsedUpstreamQuotaUsage, error) {
@@ -1042,13 +1002,6 @@ func computeQuotaFromUsage(parsed parsedUpstreamQuotaUsage, storedLimit float64)
 		// 火山方舟配额为多窗口绝对额度/百分比，顶层不聚合 quota_limit/quota_used。
 		// 双窗口数据由 snapshot.Volcengine 承载；此处 limit/used/remaining 保持 0，
 		// persistSnapshot 的火山分支会写 volcengine_* 快照键。
-		return 0, 0, 0, mode
-	}
-	if parsed.zhipu != nil {
-		mode = UpstreamQuotaSyncModeZhipu
-		// 智谱配额为百分比（无绝对额度），顶层不聚合 quota_limit/quota_used。
-		// 双窗口数据由 snapshot.Zhipu 承载；此处 limit/used/remaining 保持 0，
-		// persistSnapshot 的智谱分支会写 zhipu_* 快照键。
 		return 0, 0, 0, mode
 	}
 	if parsed.subscription != nil && parsed.mode != "quota_limited" {
@@ -1243,6 +1196,12 @@ func upstreamQuotaSyncBaseURL(account *Account) string {
 		return account.GetGrokBaseURL()
 	case PlatformGemini, PlatformAntigravity:
 		return strings.TrimSpace(account.GetCredential("base_url"))
+	case PlatformKimi, PlatformZhipu, PlatformDeepseek:
+		// 国产供应商原生平台账号：与 openai 平台走同一套配额同步。
+		// GetOpenAIBaseURL 已覆盖凭证 base_url / adaptive 分协议地址 / 平台默认。
+		// 智谱/DeepSeek 的配额与余额由原生 CNProviderQuotaService /
+		// CNProviderBalanceService 负责，不在此通道（域名落 sub2api fallback）。
+		return account.GetOpenAIBaseURL()
 	default:
 		return account.GetBaseURL()
 	}
